@@ -25,8 +25,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️ 加载配置失败: {e}")
     
-    # 创建或更新管理员账号
+    # 创建或更新管理员账号，确保只有配置的用户名是管理员
     async with async_session() as db:
+        # 先把其他管理员降级为普通用户
+        other_admins = await db.execute(
+            select(User).where(User.is_admin == True, User.username != settings.admin_username)
+        )
+        for other in other_admins.scalars().all():
+            other.is_admin = False
+            print(f"⚠️ 降级旧管理员: {other.username}")
+        
+        # 创建或更新配置的管理员
         result = await db.execute(select(User).where(User.username == settings.admin_username))
         admin_user = result.scalar_one_or_none()
         if not admin_user:
@@ -37,14 +46,14 @@ async def lifespan(app: FastAPI):
                 daily_quota=999999
             )
             db.add(admin_user)
-            await db.commit()
             print(f"✅ 创建管理员账号: {settings.admin_username}")
         else:
             # 更新管理员密码（确保 .env 修改后生效）
             admin_user.hashed_password = get_password_hash(settings.admin_password)
             admin_user.is_admin = True
-            await db.commit()
-            print(f"✅ 已同步管理员密码: {settings.admin_username}")
+            print(f"✅ 已同步管理员账号: {settings.admin_username}")
+        
+        await db.commit()
     
     yield
 
