@@ -720,6 +720,6 @@ MIT License
 
 ## 🙏 致谢
 
-- 感谢 **sukaka 佬** 的 [gcli2api](https://github.com/sukaka7878/gcli2api) 项目
-- 感谢 **GG 佬** 的云 CLI 站点
-- 感谢所有贡献凭证的用户！
+本项目参考了 **sukaka 大佬** 的 [gcli2api](https://github.com/sukaka7878/gcli2api) 和 **GG 大佬** 的站点
+
+感谢二位佬！
