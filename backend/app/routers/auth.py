@@ -840,3 +840,136 @@ async def get_discord_user_stats(discord_id: str, db: AsyncSession = Depends(get
         "is_active": user.is_active,
         "created_at": user.created_at.isoformat() if user.created_at else None
     }
+
+
+# ===== Discord OAuth 登录/注册 =====
+
+@router.get("/discord/login")
+async def discord_login_url():
+    """获取 Discord OAuth 登录 URL"""
+    if not settings.discord_client_id or not settings.discord_redirect_uri:
+        raise HTTPException(status_code=503, detail="Discord OAuth 未配置")
+    
+    import urllib.parse
+    params = {
+        "client_id": settings.discord_client_id,
+        "redirect_uri": settings.discord_redirect_uri,
+        "response_type": "code",
+        "scope": "identify"
+    }
+    url = f"https://discord.com/api/oauth2/authorize?{urllib.parse.urlencode(params)}"
+    return {"url": url}
+
+
+@router.get("/discord/callback")
+async def discord_callback(code: str, db: AsyncSession = Depends(get_db)):
+    """Discord OAuth 回调处理"""
+    import httpx
+    
+    if not settings.discord_client_id or not settings.discord_client_secret:
+        raise HTTPException(status_code=503, detail="Discord OAuth 未配置")
+    
+    # 1. 用 code 换取 access_token
+    token_url = "https://discord.com/api/oauth2/token"
+    data = {
+        "client_id": settings.discord_client_id,
+        "client_secret": settings.discord_client_secret,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": settings.discord_redirect_uri
+    }
+    
+    async with httpx.AsyncClient() as client:
+        token_resp = await client.post(token_url, data=data)
+        if token_resp.status_code != 200:
+            raise HTTPException(status_code=400, detail="Discord 授权失败")
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+        
+        # 2. 获取用户信息
+        user_resp = await client.get(
+            "https://discord.com/api/users/@me",
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+        if user_resp.status_code != 200:
+            raise HTTPException(status_code=400, detail="获取 Discord 用户信息失败")
+        discord_user = user_resp.json()
+    
+    discord_id = discord_user["id"]
+    discord_name = f"{discord_user['username']}"
+    
+    # 3. 查找或创建用户
+    result = await db.execute(select(User).where(User.discord_id == discord_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        # 新用户注册
+        if not settings.allow_registration:
+            raise HTTPException(status_code=403, detail="注册已关闭")
+        
+        # 用 Discord ID 作为用户名
+        username = f"discord_{discord_id}"
+        
+        # 检查用户名是否已存在
+        existing = await db.execute(select(User).where(User.username == username))
+        if existing.scalar_one_or_none():
+            username = f"discord_{discord_id}_{int(datetime.utcnow().timestamp())}"
+        
+        user = User(
+            username=username,
+            password_hash="",  # Discord 用户无密码
+            discord_id=discord_id,
+            discord_name=discord_name,
+            daily_quota=settings.default_daily_quota,
+            is_active=True
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+    else:
+        # 更新 Discord 名称
+        if user.discord_name != discord_name:
+            user.discord_name = discord_name
+            await db.commit()
+    
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="账户已被禁用")
+    
+    # 4. 生成 JWT token
+    jwt_token = create_access_token(data={"sub": user.username})
+    
+    # 5. 返回 HTML 页面，通过 postMessage 传递 token 给前端
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><title>登录成功</title></head>
+    <body>
+    <script>
+        window.opener.postMessage({{
+            type: 'discord_login',
+            token: '{jwt_token}',
+            user: {{
+                id: {user.id},
+                username: '{user.username}',
+                discord_id: '{user.discord_id}',
+                discord_name: '{discord_name}',
+                is_admin: {'true' if user.is_admin else 'false'}
+            }}
+        }}, '*');
+        window.close();
+    </script>
+    <p>登录成功，正在跳转...</p>
+    </body>
+    </html>
+    """
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=html)
+
+
+@router.get("/discord/config")
+async def get_discord_config():
+    """获取 Discord OAuth 配置状态"""
+    return {
+        "enabled": bool(settings.discord_client_id and settings.discord_client_secret),
+        "client_id": settings.discord_client_id if settings.discord_client_id else None
+    }

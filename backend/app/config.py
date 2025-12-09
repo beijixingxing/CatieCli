@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     openai_api_key: str = ""  # 如果填写，则支持真正的 OpenAI API 反代
     openai_api_base: str = "https://api.openai.com"
     
+    # Discord OAuth (可选，用于 Discord 登录/注册)
+    discord_client_id: str = ""
+    discord_client_secret: str = ""
+    discord_redirect_uri: str = ""  # 例如: https://你的域名/api/auth/discord/callback
+    
     class Config:
         env_file = ".env"
         extra = "ignore"
