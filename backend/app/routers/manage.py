@@ -298,6 +298,7 @@ async def verify_all_credentials(
             access_token = await CredentialPool.get_access_token(cred, db)
             if not access_token:
                 cred.is_active = False
+                db.add(cred)
                 results["invalid"] += 1
                 results["details"].append({"id": cred.id, "email": cred.email, "status": "invalid", "reason": "无法获取 token"})
                 continue
@@ -347,6 +348,9 @@ async def verify_all_credentials(
             if account_type != "unknown":
                 cred.last_error = f"account_type:{account_type}"
             
+            # 确保变更被追踪
+            db.add(cred)
+            
             if is_valid:
                 results["valid"] += 1
                 if supports_3:
@@ -367,6 +371,7 @@ async def verify_all_credentials(
                 results["details"].append({"id": cred.id, "email": cred.email, "status": "invalid", "reason": f"API 返回 {resp.status_code}"})
         except Exception as e:
             cred.is_active = False
+            db.add(cred)
             results["invalid"] += 1
             results["details"].append({"id": cred.id, "email": cred.email, "status": "error", "reason": str(e)[:50]})
     
