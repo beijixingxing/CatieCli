@@ -452,9 +452,9 @@ export default function Admin() {
                       <tr>
                         <th>ID</th>
                         <th>名称</th>
+                        <th>所有者</th>
                         <th>API Key</th>
                         <th>请求数</th>
-                        <th>失败数</th>
                         <th>状态</th>
                         <th>最后错误</th>
                         <th>操作</th>
@@ -464,12 +464,19 @@ export default function Admin() {
                       {credentials.map(c => (
                         <tr key={c.id}>
                           <td className="text-gray-400">{c.id}</td>
-                          <td>{c.name}</td>
+                          <td>
+                            <div>{c.name || c.email || '-'}</div>
+                            {c.is_public && <span className="text-xs text-green-400">公共</span>}
+                          </td>
+                          <td className="text-sm">
+                            {c.owner_name ? (
+                              <span className="text-blue-400">{c.owner_name}</span>
+                            ) : (
+                              <span className="text-gray-500">-</span>
+                            )}
+                          </td>
                           <td className="font-mono text-sm text-gray-400">{c.api_key}</td>
                           <td>{c.total_requests}</td>
-                          <td className={c.failed_requests > 0 ? 'text-red-400' : ''}>
-                            {c.failed_requests}
-                          </td>
                           <td>
                             {c.is_active ? (
                               <span className="text-green-400">活跃</span>

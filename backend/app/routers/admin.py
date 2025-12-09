@@ -129,14 +129,25 @@ async def list_credentials(
     db: AsyncSession = Depends(get_db)
 ):
     """获取所有凭证"""
-    credentials = await CredentialPool.get_all_credentials(db)
+    from sqlalchemy.orm import selectinload
+    
+    # 获取凭证及其所有者信息
+    result = await db.execute(
+        select(Credential).options(selectinload(Credential.owner)).order_by(Credential.created_at.desc())
+    )
+    credentials = result.scalars().all()
+    
     return {
         "credentials": [
             {
                 "id": c.id,
                 "name": c.name,
-                "api_key": c.api_key[:20] + "..." if len(c.api_key) > 20 else c.api_key,
+                "email": c.email,
+                "api_key": c.api_key[:20] + "..." if c.api_key and len(c.api_key) > 20 else (c.api_key or ""),
                 "is_active": c.is_active,
+                "is_public": c.is_public,
+                "user_id": c.user_id,
+                "owner_name": c.owner.username if c.owner else None,
                 "total_requests": c.total_requests,
                 "failed_requests": c.failed_requests,
                 "last_used_at": c.last_used_at,
@@ -193,10 +204,20 @@ async def delete_credential(
     db: AsyncSession = Depends(get_db)
 ):
     """删除凭证"""
+    from app.config import settings
+    
     result = await db.execute(select(Credential).where(Credential.id == credential_id))
     credential = result.scalar_one_or_none()
     if not credential:
         raise HTTPException(status_code=404, detail="凭证不存在")
+    
+    # 如果是公开凭证，扣除用户配额
+    if credential.is_public and credential.user_id:
+        owner_result = await db.execute(select(User).where(User.id == credential.user_id))
+        owner = owner_result.scalar_one_or_none()
+        if owner:
+            owner.daily_quota = max(settings.default_daily_quota, owner.daily_quota - settings.credential_reward_quota)
+            print(f"[管理员删除凭证] 用户 {owner.username} 扣除 {settings.credential_reward_quota} 额度", flush=True)
     
     await db.delete(credential)
     await db.commit()
