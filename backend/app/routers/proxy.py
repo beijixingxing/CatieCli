@@ -624,3 +624,137 @@ async def gemini_stream_generate_content(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
     )
+
+
+# ===== OpenAI 原生反代 =====
+
+@router.api_route("/openai/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def openai_proxy(
+    path: str,
+    request: Request,
+    user: User = Depends(get_user_from_api_key),
+    db: AsyncSession = Depends(get_db)
+):
+    """OpenAI 原生 API 反代 - 直接转发到 OpenAI"""
+    import httpx
+    
+    if not settings.openai_api_key:
+        raise HTTPException(status_code=503, detail="未配置 OpenAI API Key，无法使用 OpenAI 反代")
+    
+    start_time = time.time()
+    
+    # 检查速率限制
+    user_has_public = await CredentialPool.check_user_has_public_creds(db, user.id)
+    one_minute_ago = datetime.utcnow() - timedelta(minutes=1)
+    rpm_result = await db.execute(
+        select(func.count(UsageLog.id))
+        .where(UsageLog.user_id == user.id)
+        .where(UsageLog.created_at >= one_minute_ago)
+    )
+    current_rpm = rpm_result.scalar() or 0
+    max_rpm = settings.contributor_rpm if user_has_public else settings.base_rpm
+    
+    if current_rpm >= max_rpm:
+        raise HTTPException(status_code=429, detail=f"速率限制: {max_rpm} 次/分钟")
+    
+    # 构建目标 URL
+    target_url = f"{settings.openai_api_base}/{path}"
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+    
+    # 获取请求体
+    body = None
+    if request.method in ["POST", "PUT", "PATCH"]:
+        body = await request.body()
+    
+    # 构建请求头（替换 Authorization）
+    headers = dict(request.headers)
+    headers["Authorization"] = f"Bearer {settings.openai_api_key}"
+    # 移除 host 头
+    headers.pop("host", None)
+    headers.pop("Host", None)
+    
+    # 记录日志
+    async def log_usage(status_code: int = 200):
+        latency = (time.time() - start_time) * 1000
+        log = UsageLog(
+            user_id=user.id,
+            credential_id=None,
+            model="openai",
+            endpoint=f"/openai/{path}",
+            status_code=status_code,
+            latency_ms=latency
+        )
+        db.add(log)
+        await db.commit()
+        await notify_log_update({
+            "username": user.username,
+            "model": "openai",
+            "status_code": status_code,
+            "latency_ms": round(latency, 0),
+            "created_at": datetime.utcnow().isoformat()
+        })
+        await notify_stats_update()
+    
+    # 判断是否是流式请求
+    is_stream = False
+    if body:
+        try:
+            body_json = json.loads(body)
+            is_stream = body_json.get("stream", False)
+        except:
+            pass
+    
+    print(f"[OpenAI Proxy] {request.method} {target_url}, stream={is_stream}", flush=True)
+    
+    try:
+        if is_stream:
+            # 流式响应
+            async def stream_generator():
+                try:
+                    async with httpx.AsyncClient(timeout=120.0) as client:
+                        async with client.stream(
+                            request.method, target_url,
+                            headers=headers,
+                            content=body
+                        ) as response:
+                            if response.status_code != 200:
+                                error = await response.aread()
+                                await log_usage(response.status_code)
+                                yield f"data: {json.dumps({'error': error.decode()})}\n\n"
+                                return
+                            
+                            async for line in response.aiter_lines():
+                                if line:
+                                    yield f"{line}\n"
+                    
+                    await log_usage()
+                except Exception as e:
+                    await log_usage(500)
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            
+            return StreamingResponse(
+                stream_generator(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+            )
+        else:
+            # 非流式响应
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.request(
+                    request.method, target_url,
+                    headers=headers,
+                    content=body
+                )
+                
+                await log_usage(response.status_code)
+                
+                # 返回响应
+                return JSONResponse(
+                    content=response.json() if response.headers.get("content-type", "").startswith("application/json") else {"text": response.text},
+                    status_code=response.status_code
+                )
+    
+    except Exception as e:
+        await log_usage(500)
+        raise HTTPException(status_code=500, detail=f"OpenAI API 请求失败: {str(e)}")

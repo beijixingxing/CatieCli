@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     google_client_id: str = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
     google_client_secret: str = "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"
     
+    # OpenAI API 反代 (可选)
+    openai_api_key: str = ""  # 如果填写，则支持真正的 OpenAI API 反代
+    openai_api_base: str = "https://api.openai.com"
+    
     class Config:
         env_file = ".env"
         extra = "ignore"
