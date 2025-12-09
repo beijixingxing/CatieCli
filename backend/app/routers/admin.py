@@ -204,6 +204,31 @@ async def delete_credential(
     return {"message": "删除成功"}
 
 
+@router.get("/credentials/export")
+async def export_all_credentials(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """导出所有凭证（包含 refresh_token）"""
+    credentials = await CredentialPool.get_all_credentials(db)
+    export_data = []
+    for c in credentials:
+        export_data.append({
+            "id": c.id,
+            "email": c.email,
+            "name": c.name,
+            "refresh_token": c.refresh_token,
+            "access_token": c.access_token,
+            "project_id": c.project_id,
+            "model_tier": c.model_tier,
+            "is_active": c.is_active,
+            "is_public": c.is_public,
+            "user_id": c.user_id,
+            "created_at": c.created_at.isoformat() if c.created_at else None
+        })
+    return export_data
+
+
 # ===== 统计 =====
 @router.get("/stats")
 async def get_stats(

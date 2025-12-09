@@ -152,6 +152,24 @@ export default function Admin() {
     }
   }
 
+  const exportAllCredentials = async () => {
+    try {
+      const res = await api.get('/api/admin/credentials/export')
+      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `all_credentials_${new Date().toISOString().slice(0, 10)}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      alert('导出成功!')
+    } catch (err) {
+      alert('导出失败: ' + (err.response?.data?.detail || err.message))
+    }
+  }
+
   const tabs = [
     { id: 'users', label: '用户管理', icon: Users },
     { id: 'credentials', label: '凭证池', icon: Key },
@@ -453,6 +471,18 @@ export default function Admin() {
                     >
                       {verifyingAll ? <RefreshCw size={16} className="animate-spin" /> : <Check size={16} />}
                       {verifyingAll ? '检测中...' : '开始检测'}
+                    </button>
+                  </div>
+                  
+                  <div className="bg-green-600/20 border border-green-500/30 rounded-xl p-4">
+                    <div className="font-medium text-green-400 mb-1">📦 导出凭证</div>
+                    <p className="text-sm text-gray-400 mb-3">导出所有凭证为JSON</p>
+                    <button
+                      onClick={exportAllCredentials}
+                      className="btn bg-green-600 hover:bg-green-500 text-white flex items-center gap-2"
+                    >
+                      <Download size={16} />
+                      导出全部
                     </button>
                   </div>
                 </div>
