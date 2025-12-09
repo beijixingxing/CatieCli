@@ -490,30 +490,30 @@ export default function Credentials() {
               </span>
             </div>
             
-            {/* 总配额 */}
-            {quotaModal.total && (
+            {/* Flash 配额 */}
+            {quotaModal.flash && (
               <div className="p-4 border-b border-dark-600">
                 <div className="flex items-center justify-between text-sm mb-2">
-                  <span className="font-semibold">CLI 总配额</span>
+                  <span className="font-semibold text-cyan-400">2.5-flash 配额</span>
                   <span className={`font-bold ${
-                    quotaModal.total.percentage > 50 ? 'text-green-400' : 
-                    quotaModal.total.percentage > 20 ? 'text-yellow-400' : 'text-red-400'
+                    quotaModal.flash.percentage > 50 ? 'text-green-400' : 
+                    quotaModal.flash.percentage > 20 ? 'text-yellow-400' : 'text-red-400'
                   }`}>
-                    {quotaModal.total.percentage}%
+                    {quotaModal.flash.percentage}%
                   </span>
                 </div>
                 <div className="h-3 bg-dark-600 rounded-full overflow-hidden">
                   <div 
                     className={`h-full rounded-full transition-all ${
-                      quotaModal.total.percentage > 50 ? 'bg-green-500' : 
-                      quotaModal.total.percentage > 20 ? 'bg-yellow-500' : 'bg-red-500'
+                      quotaModal.flash.percentage > 50 ? 'bg-cyan-500' : 
+                      quotaModal.flash.percentage > 20 ? 'bg-yellow-500' : 'bg-red-500'
                     }`}
-                    style={{ width: `${quotaModal.total.percentage}%` }}
+                    style={{ width: `${quotaModal.flash.percentage}%` }}
                   />
                 </div>
                 <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
-                  <span>已用 {quotaModal.total.used} / {quotaModal.total.limit}</span>
-                  <span>剩余 {quotaModal.total.remaining}</span>
+                  <span>已用 {quotaModal.flash.used} / {quotaModal.flash.limit}</span>
+                  <span>剩余 {quotaModal.flash.remaining}</span>
                 </div>
               </div>
             )}

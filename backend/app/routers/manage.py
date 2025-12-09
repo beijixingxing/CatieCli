@@ -388,11 +388,11 @@ async def verify_all_credentials(
 
 
 # Google Gemini CLI 配额参考（每日请求数限制）
-# Pro 订阅账号: CLI 总额度 1000，2.5/3.0 共用 250
-# 普通账号: 总额度 1500，2.5/3.0 共用 200
+# Pro 订阅账号: CLI 总额度 1500，2.5/3.0 共用 250
+# 普通账号: 总额度 1000，2.5/3.0 共用 200
 QUOTA_LIMITS = {
-    "pro": {"total": 1000, "premium": 250},   # Pro 账号
-    "free": {"total": 1500, "premium": 200},  # 普通账号
+    "pro": {"total": 1500, "premium": 250},   # Pro 账号
+    "free": {"total": 1000, "premium": 200},  # 普通账号
 }
 
 # 高级模型（2.5-pro, 3.0 系列）共享 premium 配额
@@ -461,15 +461,23 @@ async def get_credential_quota(
     # 按使用量排序
     quota_info.sort(key=lambda x: -x["used"])
     
-    # 计算总配额
-    total_limit = quota_config["total"]
-    total_remaining = max(0, total_limit - total_used)
-    total_percentage = min(100, (total_remaining / total_limit) * 100) if total_limit > 0 else 0
+    # 计算 Flash 使用量（非高级模型）
+    flash_used = total_used - premium_used
     
     # 计算高级模型配额（2.5-pro + 3.0 共享）
     premium_limit = quota_config["premium"]
     premium_remaining = max(0, premium_limit - premium_used)
     premium_percentage = min(100, (premium_remaining / premium_limit) * 100) if premium_limit > 0 else 0
+    
+    # 计算 Flash 配额（总配额 - 高级配额 = Flash 专用）
+    flash_limit = quota_config["total"] - quota_config["premium"]  # 750 或 1300
+    flash_remaining = max(0, flash_limit - flash_used)
+    flash_percentage = min(100, (flash_remaining / flash_limit) * 100) if flash_limit > 0 else 0
+    
+    # 总配额
+    total_limit = quota_config["total"]
+    total_remaining = max(0, total_limit - total_used)
+    total_percentage = min(100, (total_remaining / total_limit) * 100) if total_limit > 0 else 0
     
     # 获取最后重置时间（每日 UTC 0:00 重置）
     next_reset = (datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1))
@@ -480,18 +488,19 @@ async def get_credential_quota(
         "email": cred.email,
         "account_type": "pro" if is_pro else "free",
         "reset_time": next_reset.isoformat() + "Z",
-        "total": {
-            "used": total_used,
-            "limit": total_limit,
-            "remaining": total_remaining,
-            "percentage": round(total_percentage, 1)
+        "flash": {
+            "used": flash_used,
+            "limit": flash_limit,
+            "remaining": flash_remaining,
+            "percentage": round(flash_percentage, 1),
+            "note": "2.5-flash 专用"
         },
         "premium": {
             "used": premium_used,
             "limit": premium_limit,
             "remaining": premium_remaining,
             "percentage": round(premium_percentage, 1),
-            "note": "2.5-pro 和 3.0 系列共用"
+            "note": "2.5-pro 和 3.0 共用"
         },
         "models": quota_info
     }
