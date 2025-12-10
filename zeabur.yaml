@@ -43,10 +43,10 @@ spec:
           description: Discord OAuth 客户端密钥（可选）
         - key: PORT
           description: 服务端口
-          default: '5001'
+          default: '8080'
       ports:
         - id: web
-          port: 5001
+          port: 8080
           type: HTTP
       volumes:
         - id: data
