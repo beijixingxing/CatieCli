@@ -299,6 +299,18 @@ async def upload_credentials(
             # 创建凭证（加密存储）
             email = cred_data.get("email") or file.filename
             project_id = cred_data.get("project_id", "")
+            refresh_token = cred_data.get("refresh_token")
+            
+            # 去重检查：根据 email 判断是否已存在（同一用户）
+            existing = await db.execute(
+                select(Credential).where(
+                    Credential.user_id == user.id,
+                    Credential.email == email
+                )
+            )
+            if existing.scalar_one_or_none():
+                results.append({"filename": file.filename, "status": "skip", "message": f"凭证已存在: {email}"})
+                continue
             
             # 自动验证凭证有效性
             is_valid = False

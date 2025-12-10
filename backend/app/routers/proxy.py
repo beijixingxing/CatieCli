@@ -75,14 +75,22 @@ async def options_handler():
 
 @router.get("/v1/models")
 @router.get("/models")
-async def list_models(user: User = Depends(get_user_from_api_key)):
+async def list_models(request: Request, user: User = Depends(get_user_from_api_key), db: AsyncSession = Depends(get_db)):
     """列出可用模型 (OpenAI兼容)"""
+    from app.models.user import Credential
+    
+    # 检查是否有可用的 3.0 凭证
+    has_tier3 = await CredentialPool.has_tier3_credentials(user, db)
+    
     # 基础模型 (Gemini 2.5+)
     base_models = [
         "gemini-2.5-pro",
         "gemini-2.5-flash", 
-        "gemini-3-pro-preview",
     ]
+    
+    # 只有有 3.0 凭证时才添加 3.0 模型
+    if has_tier3:
+        base_models.append("gemini-3-pro-preview")
     
     # Thinking 后缀
     thinking_suffixes = ["-maxthinking", "-nothinking"]
@@ -355,12 +363,14 @@ async def gemini_options_handler(model: str):
 
 @router.get("/v1beta/models")
 @router.get("/v1/v1beta/models")
-async def list_gemini_models(user: User = Depends(get_user_from_api_key)):
+async def list_gemini_models(request: Request, user: User = Depends(get_user_from_api_key), db: AsyncSession = Depends(get_db)):
     """Gemini 格式模型列表"""
-    base_models = [
-        "gemini-2.5-pro", "gemini-2.5-flash", 
-        "gemini-3-pro-preview",
-    ]
+    # 检查是否有可用的 3.0 凭证
+    has_tier3 = await CredentialPool.has_tier3_credentials(user, db)
+    
+    base_models = ["gemini-2.5-pro", "gemini-2.5-flash"]
+    if has_tier3:
+        base_models.append("gemini-3-pro-preview")
     
     models = []
     for base in base_models:

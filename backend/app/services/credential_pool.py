@@ -33,6 +33,41 @@ class CredentialPool:
         return result.scalar_one_or_none() is not None
     
     @staticmethod
+    async def has_tier3_credentials(user, db: AsyncSession) -> bool:
+        """检查用户可用的凭证池中是否有 3.0 凭证（用于模型列表显示）"""
+        pool_mode = settings.credential_pool_mode
+        query = select(Credential).where(
+            Credential.is_active == True,
+            Credential.model_tier == "3"
+        ).limit(1)
+        
+        if pool_mode == "private":
+            # 私有模式：只检查自己的凭证
+            query = query.where(Credential.user_id == user.id)
+        
+        elif pool_mode == "tier3_shared":
+            # 3.0共享模式：有3.0凭证的用户可用公共3.0池
+            user_has_tier3 = await CredentialPool.check_user_has_tier3_creds(db, user.id)
+            if user_has_tier3:
+                query = query.where(
+                    or_(Credential.is_public == True, Credential.user_id == user.id)
+                )
+            else:
+                query = query.where(Credential.user_id == user.id)
+        
+        else:  # full_shared (大锅饭模式)
+            user_has_public = await CredentialPool.check_user_has_public_creds(db, user.id)
+            if user_has_public:
+                query = query.where(
+                    or_(Credential.is_public == True, Credential.user_id == user.id)
+                )
+            else:
+                query = query.where(Credential.user_id == user.id)
+        
+        result = await db.execute(query)
+        return result.scalar_one_or_none() is not None
+    
+    @staticmethod
     async def get_available_credential(
         db: AsyncSession, 
         user_id: int = None,
