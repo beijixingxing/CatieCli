@@ -609,8 +609,7 @@ async def verify_my_credential(
                 
                 if resp.status_code == 200 or resp.status_code == 429:
                     is_valid = True
-                    if resp.status_code == 429:
-                        error_msg = "2.5 配额已用尽 (429)"
+                    # 429 是检测时触发的限速，不是真正用完配额，不记录错误
                     
                     # 凭证有效，再测试 3.0
                     test_payload_3 = {
@@ -623,8 +622,6 @@ async def verify_my_credential(
                     
                     if resp3.status_code == 200 or resp3.status_code == 429:
                         supports_3 = True
-                        if resp3.status_code == 429:
-                            error_msg = "3.0 配额已用尽 (429)"
                     else:
                         supports_3 = False
                 elif resp.status_code in [401, 403]:
