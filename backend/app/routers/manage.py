@@ -657,6 +657,7 @@ async def get_config(user: User = Depends(get_current_admin)):
         "discord_only_registration": settings.discord_only_registration,
         "discord_oauth_only": settings.discord_oauth_only,
         "default_daily_quota": settings.default_daily_quota,
+        "no_credential_quota": settings.no_credential_quota,
         "credential_reward_quota": settings.credential_reward_quota,
         "base_rpm": settings.base_rpm,
         "contributor_rpm": settings.contributor_rpm,
@@ -690,6 +691,7 @@ async def update_config(
     discord_only_registration: Optional[bool] = Form(None),
     discord_oauth_only: Optional[bool] = Form(None),
     default_daily_quota: Optional[int] = Form(None),
+    no_credential_quota: Optional[int] = Form(None),
     credential_reward_quota: Optional[int] = Form(None),
     base_rpm: Optional[int] = Form(None),
     contributor_rpm: Optional[int] = Form(None),
@@ -721,6 +723,10 @@ async def update_config(
         settings.default_daily_quota = default_daily_quota
         await save_config_to_db("default_daily_quota", default_daily_quota)
         updated["default_daily_quota"] = default_daily_quota
+    if no_credential_quota is not None:
+        settings.no_credential_quota = no_credential_quota
+        await save_config_to_db("no_credential_quota", no_credential_quota)
+        updated["no_credential_quota"] = no_credential_quota
     if credential_reward_quota is not None:
         settings.credential_reward_quota = credential_reward_quota
         await save_config_to_db("credential_reward_quota", credential_reward_quota)
