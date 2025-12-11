@@ -170,32 +170,41 @@ export default function Settings() {
             )}
           </div>
 
-          {/* 凭证奖励 - 按等级细分 */}
+          {/* 凭证奖励 - 按模型分类 */}
           <div>
             <h3 className="font-semibold mb-2">凭证上传奖励额度 🎁</h3>
-            <p className="text-gray-400 text-sm mb-3">用户上传凭证到公共池时增加的配额（按凭证等级区分）</p>
-            <div className="grid grid-cols-2 gap-4">
+            <p className="text-gray-400 text-sm mb-3">按模型分类的额度配置，2.5凭证=Flash+2.5Pro，3.0凭证=Flash+2.5Pro+3.0</p>
+            <div className="grid grid-cols-3 gap-4">
               <div>
-                <label className="text-sm text-gray-400 mb-1 block">2.5 凭证奖励</label>
+                <label className="text-sm text-gray-400 mb-1 block">Flash 额度</label>
                 <input
                   type="number"
-                  value={config?.credential_reward_quota_25 ?? ''}
-                  onChange={(e) => setConfig({ ...config, credential_reward_quota_25: e.target.value === '' ? '' : parseInt(e.target.value) })}
-                  className="w-full bg-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  value={config?.quota_flash ?? ''}
+                  onChange={(e) => setConfig({ ...config, quota_flash: e.target.value === '' ? '' : parseInt(e.target.value) })}
+                  className="w-full bg-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                 />
               </div>
               <div>
-                <label className="text-sm text-gray-400 mb-1 block">3.0 凭证奖励</label>
+                <label className="text-sm text-gray-400 mb-1 block">2.5 Pro 额度</label>
                 <input
                   type="number"
-                  value={config?.credential_reward_quota_30 ?? ''}
-                  onChange={(e) => setConfig({ ...config, credential_reward_quota_30: e.target.value === '' ? '' : parseInt(e.target.value) })}
-                  className="w-full bg-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  value={config?.quota_25pro ?? ''}
+                  onChange={(e) => setConfig({ ...config, quota_25pro: e.target.value === '' ? '' : parseInt(e.target.value) })}
+                  className="w-full bg-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-400 mb-1 block">3.0 额度</label>
+                <input
+                  type="number"
+                  value={config?.quota_30pro ?? ''}
+                  onChange={(e) => setConfig({ ...config, quota_30pro: e.target.value === '' ? '' : parseInt(e.target.value) })}
+                  className="w-full bg-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-500"
                 />
               </div>
             </div>
             <p className="text-green-400 text-sm mt-2">
-              💡 2.5凭证 +{config?.credential_reward_quota_25 ?? 1000} | 3.0凭证 +{config?.credential_reward_quota_30 ?? 2000}
+              💡 2.5凭证 +{(config?.quota_flash ?? 1000) + (config?.quota_25pro ?? 500)} | 3.0凭证 +{(config?.quota_flash ?? 1000) + (config?.quota_25pro ?? 500) + (config?.quota_30pro ?? 300)}
             </p>
           </div>
 

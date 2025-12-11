@@ -360,8 +360,11 @@ async def credential_from_callback_url(
         # 奖励用户额度（只有新凭证、捐赠到公共池且凭证有效才奖励）
         reward_quota = 0
         if is_new_credential and data.is_public and is_valid:
-            # 根据凭证等级细分奖励
-            reward_quota = settings.credential_reward_quota_30 if detected_tier == "3" else settings.credential_reward_quota_25
+            # 根据凭证等级细分奖励：2.5=flash+25pro, 3.0=flash+25pro+30pro
+            if detected_tier == "3":
+                reward_quota = settings.quota_flash + settings.quota_25pro + settings.quota_30pro
+            else:
+                reward_quota = settings.quota_flash + settings.quota_25pro
             user.daily_quota += reward_quota
             print(f"[凭证奖励] 用户 {user.username} 获得 {reward_quota} 额度奖励 (等级: {detected_tier})", flush=True)
         elif not is_new_credential:
@@ -568,7 +571,10 @@ async def credential_from_callback_url_discord(
         # 奖励额度（只有新凭证才奖励）
         reward_quota = 0
         if is_new_credential and data.is_public and is_valid:
-            reward_quota = settings.credential_reward_quota_30 if detected_tier == "3" else settings.credential_reward_quota_25
+            if detected_tier == "3":
+                reward_quota = settings.quota_flash + settings.quota_25pro + settings.quota_30pro
+            else:
+                reward_quota = settings.quota_flash + settings.quota_25pro
             user.daily_quota += reward_quota
             print(f"[Discord OAuth] 用户 {user.username} 获得 {reward_quota} 额度奖励", flush=True)
         

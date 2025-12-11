@@ -683,6 +683,9 @@ async def get_config(user: User = Depends(get_current_admin)):
         "credential_reward_quota": settings.credential_reward_quota,
         "credential_reward_quota_25": settings.credential_reward_quota_25,
         "credential_reward_quota_30": settings.credential_reward_quota_30,
+        "quota_flash": settings.quota_flash,
+        "quota_25pro": settings.quota_25pro,
+        "quota_30pro": settings.quota_30pro,
         "base_rpm": settings.base_rpm,
         "contributor_rpm": settings.contributor_rpm,
         "error_retry_count": settings.error_retry_count,
@@ -732,6 +735,9 @@ async def update_config(
     credential_reward_quota: Optional[int] = Form(None),
     credential_reward_quota_25: Optional[int] = Form(None),
     credential_reward_quota_30: Optional[int] = Form(None),
+    quota_flash: Optional[int] = Form(None),
+    quota_25pro: Optional[int] = Form(None),
+    quota_30pro: Optional[int] = Form(None),
     base_rpm: Optional[int] = Form(None),
     contributor_rpm: Optional[int] = Form(None),
     error_retry_count: Optional[int] = Form(None),
@@ -780,6 +786,18 @@ async def update_config(
         settings.credential_reward_quota_30 = credential_reward_quota_30
         await save_config_to_db("credential_reward_quota_30", credential_reward_quota_30)
         updated["credential_reward_quota_30"] = credential_reward_quota_30
+    if quota_flash is not None:
+        settings.quota_flash = quota_flash
+        await save_config_to_db("quota_flash", quota_flash)
+        updated["quota_flash"] = quota_flash
+    if quota_25pro is not None:
+        settings.quota_25pro = quota_25pro
+        await save_config_to_db("quota_25pro", quota_25pro)
+        updated["quota_25pro"] = quota_25pro
+    if quota_30pro is not None:
+        settings.quota_30pro = quota_30pro
+        await save_config_to_db("quota_30pro", quota_30pro)
+        updated["quota_30pro"] = quota_30pro
     if base_rpm is not None:
         settings.base_rpm = base_rpm
         await save_config_to_db("base_rpm", base_rpm)

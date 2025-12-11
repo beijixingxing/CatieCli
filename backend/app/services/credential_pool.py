@@ -287,8 +287,11 @@ class CredentialPool:
                     user_result = await db.execute(select(User).where(User.id == cred.user_id))
                     user = user_result.scalar_one_or_none()
                     if user:
-                        # 根据凭证等级扣除额度
-                        deduct = settings.credential_reward_quota_30 if cred.model_tier == "3" else settings.credential_reward_quota_25
+                        # 根据凭证等级扣除额度：2.5=flash+25pro, 3.0=flash+25pro+30pro
+                        if cred.model_tier == "3":
+                            deduct = settings.quota_flash + settings.quota_25pro + settings.quota_30pro
+                        else:
+                            deduct = settings.quota_flash + settings.quota_25pro
                         # 仅在当前额度包含奖励部分时才回收，避免把自定义额度打回默认
                         if user.daily_quota - settings.default_daily_quota >= deduct:
                             user.daily_quota = max(

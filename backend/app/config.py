@@ -35,10 +35,15 @@ class Settings(BaseSettings):
     default_daily_quota: int = 100  # 新用户默认配额
     no_credential_quota: int = 0    # 无有效凭证用户的配额上限（0=无限制，使用用户自己的配额）
     
-    # 凭证奖励：每上传一个凭证增加的额度（按凭证等级细分）
-    credential_reward_quota: int = 1000  # 兼容旧配置，默认2.5凭证奖励
-    credential_reward_quota_25: int = 1000  # 上传2.5凭证的额度奖励
-    credential_reward_quota_30: int = 2000  # 上传3.0凭证的额度奖励
+    # 凭证奖励：按模型分类的额度配置
+    # 2.5凭证奖励 = quota_flash + quota_25pro
+    # 3.0凭证奖励 = quota_flash + quota_25pro + quota_30pro
+    credential_reward_quota: int = 1000  # 兼容旧配置
+    credential_reward_quota_25: int = 1000  # 兼容旧配置（2.5凭证总奖励）
+    credential_reward_quota_30: int = 2000  # 兼容旧配置（3.0凭证总奖励）
+    quota_flash: int = 1000  # Flash模型额度
+    quota_25pro: int = 500   # 2.5 Pro模型额度
+    quota_30pro: int = 300   # 3.0模型额度
     
     # 速率限制 (RPM - requests per minute)
     base_rpm: int = 5  # 未上传凭证的用户
@@ -100,6 +105,9 @@ PERSISTENT_CONFIG_KEYS = [
     "credential_reward_quota",
     "credential_reward_quota_25",
     "credential_reward_quota_30",
+    "quota_flash",
+    "quota_25pro",
+    "quota_30pro",
     "base_rpm",
     "contributor_rpm",
     "credential_pool_mode",
