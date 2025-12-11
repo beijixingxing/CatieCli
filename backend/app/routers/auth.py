@@ -964,7 +964,7 @@ async def discord_login_url():
         "response_type": "code",
         "scope": "identify"
     }
-    url = f"https://discord.com/api/oauth2/authorize?{urllib.parse.urlencode(params)}"
+    url = f"https://discord.com/oauth2/authorize?{urllib.parse.urlencode(params)}"
     return {"url": url}
 
 
