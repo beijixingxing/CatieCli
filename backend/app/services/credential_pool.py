@@ -349,7 +349,8 @@ class CredentialPool:
                         storage_gb = round(limit / (1024**3), 1)
                         print(f"[检测账号] 存储空间: {storage_gb} GB", flush=True)
                         
-                        if storage_gb >= 100:
+                        # Pro 账号是 2TB (2000GB) 存储空间
+                        if storage_gb >= 2000:
                             return {"account_type": "pro", "storage_gb": storage_gb}
                         else:
                             return {"account_type": "free", "storage_gb": storage_gb}
