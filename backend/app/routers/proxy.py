@@ -21,17 +21,21 @@ router = APIRouter(tags=["API代理"])
 async def get_user_from_api_key(request: Request, db: AsyncSession = Depends(get_db)) -> User:
     """从请求中提取API Key并验证用户"""
     api_key = None
-    
+
     # 1. 从Authorization header获取
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         api_key = auth_header[7:]
-    
+
     # 2. 从x-api-key header获取
     if not api_key:
         api_key = request.headers.get("x-api-key")
-    
-    # 3. 从查询参数获取
+
+    # 3. 从x-goog-api-key header获取（Gemini原生客户端支持）
+    if not api_key:
+        api_key = request.headers.get("x-goog-api-key")
+
+    # 4. 从查询参数获取
     if not api_key:
         api_key = request.query_params.get("key")
     
