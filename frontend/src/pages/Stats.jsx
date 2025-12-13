@@ -119,21 +119,21 @@ export default function Stats() {
               <div className="bg-cyan-600/20 border border-cyan-600/30 rounded-lg p-4 text-center">
                 <div className="text-2xl font-bold text-cyan-400">
                   {globalStats.requests.by_category.flash}
-                  <span className="text-lg text-cyan-300">/{globalStats.total_quota?.flash || '-'}</span>
+                  <span className="text-lg text-cyan-300">/{globalStats.total_quota?.flash ?? '-'}</span>
                 </div>
                 <div className="text-sm text-cyan-300">Flash 请求</div>
               </div>
               <div className="bg-orange-600/20 border border-orange-600/30 rounded-lg p-4 text-center">
                 <div className="text-2xl font-bold text-orange-400">
                   {globalStats.requests.by_category['pro_2.5']}
-                  <span className="text-lg text-orange-300">/{globalStats.total_quota?.['pro_2.5'] || '-'}</span>
+                  <span className="text-lg text-orange-300">/{globalStats.total_quota?.['pro_2.5'] ?? '-'}</span>
                 </div>
                 <div className="text-sm text-orange-300">2.5 Pro 请求</div>
               </div>
               <div className="bg-pink-600/20 border border-pink-600/30 rounded-lg p-4 text-center">
                 <div className="text-2xl font-bold text-pink-400">
                   {globalStats.requests.by_category.tier_3}
-                  <span className="text-lg text-pink-300">/{globalStats.total_quota?.tier_3 || '-'}</span>
+                  <span className="text-lg text-pink-300">/{globalStats.total_quota?.tier_3 ?? '-'}</span>
                 </div>
                 <div className="text-sm text-pink-300">3.0 请求</div>
               </div>
