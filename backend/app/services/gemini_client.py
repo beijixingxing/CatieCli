@@ -310,6 +310,7 @@ class GeminiClient:
                 # 多模态内容列表
                 for item in content:
                     if isinstance(item, dict):
+                        # OpenAI 格式: {"type": "text", "text": "..."}
                         if item.get("type") == "text":
                             parts.append({"text": item.get("text", "")})
                         elif item.get("type") == "image_url":
@@ -338,6 +339,16 @@ class GeminiClient:
                                         "fileUri": url
                                     }
                                 })
+                        # Gemini 原生格式: {"text": "..."} 或 {"inlineData": {...}} 或 {"fileData": {...}}
+                        elif "text" in item and "type" not in item:
+                            parts.append({"text": item["text"]})
+                        elif "inlineData" in item:
+                            parts.append({"inlineData": item["inlineData"]})
+                        elif "fileData" in item:
+                            parts.append({"fileData": item["fileData"]})
+                        else:
+                            # 未知格式，尝试作为文本处理
+                            print(f"[GeminiClient] ⚠️ 未知内容格式: {list(item.keys())}", flush=True)
                     elif isinstance(item, str):
                         parts.append({"text": item})
             
