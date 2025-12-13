@@ -952,13 +952,14 @@ async def get_global_stats(
     )
     tier3_creds = tier3_cred_result.scalar() or 0
     
-    # 全站总额度（基于所有活跃凭证计算）
+    # 提前获取所有 scalar 值（只能调用一次）
+    total_creds_count = total_creds.scalar() or 0
+    active_creds_count = active_creds.scalar() or 0
     public_active_count = public_creds.scalar() or 0
-    active_count = active_creds.scalar() or 0
     
-    # 计算总额度（基于所有活跃凭证，tier3_creds 已在上方查询）
-    total_quota_flash = active_count * settings.stats_quota_flash
-    total_quota_25pro = active_count * settings.stats_quota_25pro
+    # 计算总额度（基于所有活跃凭证）
+    total_quota_flash = active_creds_count * settings.stats_quota_flash
+    total_quota_25pro = active_creds_count * settings.stats_quota_25pro
     total_quota_30pro = tier3_creds * settings.stats_quota_30pro
     
     # 活跃用户数（最近24小时）
@@ -981,8 +982,8 @@ async def get_global_stats(
             },
         },
         "credentials": {
-            "total": total_creds.scalar() or 0,
-            "active": active_creds.scalar() or 0,
+            "total": total_creds_count,
+            "active": active_creds_count,
             "public": public_active_count,
             "tier_3": tier3_creds,
         },
