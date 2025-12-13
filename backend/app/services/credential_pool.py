@@ -33,41 +33,6 @@ class CredentialPool:
         return result.scalar_one_or_none() is not None
     
     @staticmethod
-    async def has_tier3_credentials(user, db: AsyncSession) -> bool:
-        """检查用户可用的凭证池中是否有 3.0 凭证（用于模型列表显示）"""
-        pool_mode = settings.credential_pool_mode
-        query = select(Credential).where(
-            Credential.is_active == True,
-            Credential.model_tier == "3"
-        ).limit(1)
-        
-        if pool_mode == "private":
-            # 私有模式：只检查自己的凭证
-            query = query.where(Credential.user_id == user.id)
-        
-        elif pool_mode == "tier3_shared":
-            # 3.0共享模式：有3.0凭证的用户可用公共3.0池
-            user_has_tier3 = await CredentialPool.check_user_has_tier3_creds(db, user.id)
-            if user_has_tier3:
-                query = query.where(
-                    or_(Credential.is_public == True, Credential.user_id == user.id)
-                )
-            else:
-                query = query.where(Credential.user_id == user.id)
-        
-        else:  # full_shared (大锅饭模式)
-            user_has_public = await CredentialPool.check_user_has_public_creds(db, user.id)
-            if user_has_public:
-                query = query.where(
-                    or_(Credential.is_public == True, Credential.user_id == user.id)
-                )
-            else:
-                query = query.where(Credential.user_id == user.id)
-        
-        result = await db.execute(query)
-        return result.scalar_one_or_none() is not None
-    
-    @staticmethod
     async def get_available_credential(
         db: AsyncSession, 
         user_id: int = None,
@@ -110,32 +75,20 @@ class CredentialPool:
             query = query.where(Credential.user_id == user_id)
         
         elif pool_mode == "tier3_shared":
-            # 3.0共享模式：
-            # - 请求3.0模型：需要有3.0凭证才能用公共3.0池
-            # - 请求2.5模型：所有用户都可以用公共2.5凭证
+            # 3.0共享模式：有3.0凭证的用户可用公共3.0池
             user_has_tier3 = await CredentialPool.check_user_has_tier3_creds(db, user_id)
             
-            if required_tier == "3":
-                # 请求3.0模型
-                if user_has_tier3:
-                    # 用户有3.0凭证 → 可用公共3.0池
-                    query = query.where(
-                        or_(
-                            Credential.is_public == True,
-                            Credential.user_id == user_id
-                        )
-                    )
-                else:
-                    # 用户没有3.0凭证 → 只能用自己的凭证
-                    query = query.where(Credential.user_id == user_id)
-            else:
-                # 请求2.5模型 → 所有用户都可以用公共凭证
+            if required_tier == "3" and user_has_tier3:
+                # 请求3.0模型且用户有3.0凭证 → 可用公共3.0池
                 query = query.where(
                     or_(
                         Credential.is_public == True,
                         Credential.user_id == user_id
                     )
                 )
+            else:
+                # 其他情况只能用自己的凭证
+                query = query.where(Credential.user_id == user_id)
         
         else:  # full_shared (大锅饭模式)
             if user_has_public_creds:
@@ -191,16 +144,6 @@ class CredentialPool:
             print(f"[Token刷新] refresh_token 解密失败", flush=True)
             return None
         
-        # 优先使用凭证自己的 client_id/secret，否则使用系统配置
-        if credential.client_id and credential.client_secret:
-            client_id = decrypt_credential(credential.client_id)
-            client_secret = decrypt_credential(credential.client_secret)
-            print(f"[Token刷新] 使用凭证自己的 client_id: {client_id[:20]}...", flush=True)
-        else:
-            client_id = settings.google_client_id
-            client_secret = settings.google_client_secret
-            print(f"[Token刷新] 使用系统配置的 client_id", flush=True)
-        
         print(f"[Token刷新] 开始刷新 token, refresh_token 前20字符: {refresh_token[:20]}...", flush=True)
         
         try:
@@ -208,8 +151,8 @@ class CredentialPool:
                 response = await client.post(
                     "https://oauth2.googleapis.com/token",
                     data={
-                        "client_id": client_id,
-                        "client_secret": client_secret,
+                        "client_id": settings.google_client_id,
+                        "client_secret": settings.google_client_secret,
                         "refresh_token": refresh_token,
                         "grant_type": "refresh_token"
                     }
@@ -220,7 +163,7 @@ class CredentialPool:
                 if "access_token" in data:
                     print(f"[Token刷新] 刷新成功!", flush=True)
                     return data["access_token"]
-                print(f"[Token刷新] 刷新失败: {data.get('error', 'unknown')} - {data.get('error_description', '')}", flush=True)
+                print(f"[Token刷新] 刷新失败: {data.get('error', 'unknown')}", flush=True)
                 return None
         except Exception as e:
             print(f"[Token刷新] 异常: {e}", flush=True)
@@ -260,6 +203,16 @@ class CredentialPool:
         await db.commit()
     
     @staticmethod
+    async def mark_credential_success(db: AsyncSession, credential_id: int):
+        """标记凭证成功使用，重置失败计数"""
+        await db.execute(
+            update(Credential)
+            .where(Credential.id == credential_id)
+            .values(failed_requests=0)
+        )
+        await db.commit()
+    
+    @staticmethod
     async def disable_credential(db: AsyncSession, credential_id: int):
         """禁用凭证"""
         await db.execute(
@@ -274,8 +227,10 @@ class CredentialPool:
         """
         处理凭证失败：
         1. 标记错误
-        2. 如果是认证错误 (401/403)，禁用凭证
+        2. 如果是认证错误 (401/403) 且连续失败多次，才禁用凭证
         3. 降级用户额度（如果之前有奖励）
+        
+        防止瞬时错误误禁用：需要连续失败 3 次才禁用
         """
         from app.models.user import User
         
@@ -289,25 +244,26 @@ class CredentialPool:
             cred = result.scalar_one_or_none()
             
             if cred and cred.is_active:
-                # 禁用凭证
+                # 检查是否连续失败达到阈值（需要连续 3 次认证失败才禁用）
+                AUTH_FAIL_THRESHOLD = 3
+                if cred.failed_requests < AUTH_FAIL_THRESHOLD:
+                    print(f"[凭证警告] 凭证 {credential_id} 认证失败 ({cred.failed_requests}/{AUTH_FAIL_THRESHOLD}): {error}", flush=True)
+                    return  # 还未达到阈值，不禁用
+                
+                # 达到阈值，禁用凭证
                 cred.is_active = False
                 
-                # 如果是公开凭证，根据凭证等级降级用户奖励配额
+                # 如果是公开凭证，降级用户额度
                 if cred.is_public and cred.user_id:
                     user_result = await db.execute(select(User).where(User.id == cred.user_id))
                     user = user_result.scalar_one_or_none()
                     if user:
-                        # 根据凭证等级扣除奖励额度：2.5=flash+25pro, 3.0=flash+25pro+30pro
-                        if cred.model_tier == "3":
-                            deduct = settings.quota_flash + settings.quota_25pro + settings.quota_30pro
-                        else:
-                            deduct = settings.quota_flash + settings.quota_25pro
-                        # 只扣除奖励配额，不影响基础配额
-                        user.bonus_quota = max(0, (user.bonus_quota or 0) - deduct)
-                        print(f"[凭证降级] 用户 {user.username} 凭证失效，扣除 {deduct} 奖励额度 (等级: {cred.model_tier})", flush=True)
+                        # 扣除之前奖励的额度
+                        user.daily_quota = max(settings.default_daily_quota, user.daily_quota - settings.credential_reward_quota)
+                        print(f"[凭证降级] 用户 {user.username} 凭证失效，额度降级", flush=True)
                 
                 await db.commit()
-                print(f"[凭证禁用] 凭证 {credential_id} 已禁用: {error}", flush=True)
+                print(f"[凭证禁用] 凭证 {credential_id} 连续失败 {AUTH_FAIL_THRESHOLD} 次，已禁用: {error}", flush=True)
     
     @staticmethod
     async def get_all_credentials(db: AsyncSession):
@@ -329,99 +285,71 @@ class CredentialPool:
         """
         检测账号类型（Pro/Free）
         
-        方式1: 使用 Google Drive API 检测存储空间（需要 drive scope）
-        方式2: 如果 Drive API 失败，回退到连续请求检测
+        使用 cloudcode-pa 内部 API 进行并发测试：
+        - 普通号：并发请求容易触发 429
+        - Pro 号：并发请求不会触发 429
         
         Returns:
-            {"account_type": "pro"/"free"/"unknown", "storage_gb": float}
+            {"account_type": "pro"/"free"/"unknown", ...}
         """
         import asyncio
         
-        headers = {"Authorization": f"Bearer {access_token}"}
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
         
-        print(f"[检测账号] 尝试使用 Drive API 检测存储空间...", flush=True)
-        
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            # 方式1: 尝试 Drive API
-            try:
-                resp = await client.get(
-                    "https://www.googleapis.com/drive/v3/about?fields=storageQuota",
-                    headers=headers
-                )
-                print(f"[检测账号] Drive API 响应: {resp.status_code}", flush=True)
-                
-                if resp.status_code == 200:
-                    data = resp.json()
-                    quota = data.get("storageQuota", {})
-                    limit = int(quota.get("limit", 0))
-                    
-                    if limit > 0:
-                        storage_gb = round(limit / (1024**3), 1)
-                        print(f"[检测账号] 存储空间: {storage_gb} GB", flush=True)
-                        
-                        # Pro 账号是 2TB (2000GB) 存储空间
-                        if storage_gb >= 2000:
-                            return {"account_type": "pro", "storage_gb": storage_gb}
-                        else:
-                            return {"account_type": "free", "storage_gb": storage_gb}
-                elif resp.status_code == 403:
-                    print(f"[检测账号] Drive API 无权限，回退到连续请求检测", flush=True)
-                else:
-                    print(f"[检测账号] Drive API 意外响应: {resp.status_code}", flush=True)
-                            
-            except Exception as e:
-                print(f"[检测账号] Drive API 异常: {e}", flush=True)
-            
-            # 方式2: 回退到连续请求检测
-            print(f"[检测账号] Drive API 无权限，使用连续请求检测...", flush=True)
-            
-            headers["Content-Type"] = "application/json"
-            url = "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
-            payload = {
-                "model": "gemini-2.0-flash",
-                "project": project_id,
-                "request": {
-                    "contents": [{"role": "user", "parts": [{"text": "1"}]}],
-                    "generationConfig": {"maxOutputTokens": 1}
-                }
+        # 使用内部 API (cloudcode-pa.googleapis.com)
+        url = "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
+        payload = {
+            "model": "gemini-2.0-flash",
+            "project": project_id,
+            "request": {
+                "contents": [{"role": "user", "parts": [{"text": "1"}]}],
+                "generationConfig": {"maxOutputTokens": 1}
             }
-            
-            # 先等待 2 秒让之前的请求 RPM 窗口过去
-            print(f"[检测账号] 等待 2 秒后开始连续请求检测...", flush=True)
-            await asyncio.sleep(2)
-            
+        }
+        
+        print(f"[检测账号] 使用内部 API 检测账号类型...", flush=True)
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # 顺序发送请求，遇到 429 立即停止
             success_count = 0
-            for i in range(5):  # 增加到 5 次检测
+            
+            for i in range(3):
                 try:
                     resp = await client.post(url, headers=headers, json=payload)
                     print(f"[检测账号] 第 {i+1} 次请求: {resp.status_code}", flush=True)
                     
-                    if resp.status_code == 429:
+                    if resp.status_code == 200:
+                        success_count += 1
+                    elif resp.status_code == 429:
+                        # 触发限速
                         error_text = resp.text.lower()
                         print(f"[检测账号] 429 详情: {resp.text[:200]}", flush=True)
-                        # 只有日配额用尽才能确定，RPM 限速不做判断
+                        
                         if "per day" in error_text or "daily" in error_text:
-                            return {"account_type": "unknown", "error": "配额已用尽，无法判断"}
-                        # RPM 限速，等待后继续
-                        print(f"[检测账号] RPM 限速，等待后继续...", flush=True)
-                        await asyncio.sleep(3)
-                        continue
-                    elif resp.status_code == 200:
-                        success_count += 1
+                            # 每日配额用完
+                            print(f"[检测账号] ⚠️ 每日配额用完，无法判断", flush=True)
+                            return {"account_type": "unknown", "error": "配额已用尽"}
+                        else:
+                            # 每分钟限速 = 普通号
+                            print(f"[检测账号] ❌ 触发限速，判定为普号", flush=True)
+                            return {"account_type": "free", "method": "rate_limit"}
+                    elif resp.status_code in [401, 403]:
+                        print(f"[检测账号] 认证失败: {resp.status_code}", flush=True)
+                        return {"account_type": "unknown", "error": f"认证失败 ({resp.status_code})"}
                     else:
-                        print(f"[检测账号] 非200响应: {resp.status_code}", flush=True)
-                        return {"account_type": "unknown"}
+                        print(f"[检测账号] 未知错误: {resp.status_code}", flush=True)
+                        return {"account_type": "unknown", "error": f"API 错误 ({resp.status_code})"}
                         
                 except Exception as e:
                     print(f"[检测账号] 请求异常: {e}", flush=True)
                     return {"account_type": "unknown", "error": str(e)}
                 
-                await asyncio.sleep(1.5)
+                # 短暂等待
+                await asyncio.sleep(0.3)
             
-            # 5 次中至少 3 次成功才判定为 Pro
-            if success_count >= 3:
-                print(f"[检测账号] {success_count}/5 次请求成功，判定为 Pro", flush=True)
-                return {"account_type": "pro"}
-            else:
-                print(f"[检测账号] 只有 {success_count}/5 次成功，无法确定", flush=True)
-                return {"account_type": "unknown"}
+            # 3 次全部成功 = Pro
+            print(f"[检测账号] ✅ 3 次全部成功，判定为 Pro", flush=True)
+            return {"account_type": "pro", "method": "rate_limit"}

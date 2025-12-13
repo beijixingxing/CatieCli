@@ -21,21 +21,17 @@ router = APIRouter(tags=["API代理"])
 async def get_user_from_api_key(request: Request, db: AsyncSession = Depends(get_db)) -> User:
     """从请求中提取API Key并验证用户"""
     api_key = None
-
+    
     # 1. 从Authorization header获取
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         api_key = auth_header[7:]
-
+    
     # 2. 从x-api-key header获取
     if not api_key:
         api_key = request.headers.get("x-api-key")
-
-    # 3. 从x-goog-api-key header获取（Gemini原生客户端支持）
-    if not api_key:
-        api_key = request.headers.get("x-goog-api-key")
-
-    # 4. 从查询参数获取
+    
+    # 3. 从查询参数获取
     if not api_key:
         api_key = request.query_params.get("key")
     
@@ -49,114 +45,17 @@ async def get_user_from_api_key(request: Request, db: AsyncSession = Depends(get
     if not user.is_active:
         raise HTTPException(status_code=403, detail="账户已被禁用")
     
-    # GET 请求（如 /v1/models）不需要检查配额
-    if request.method == "GET":
-        return user
-    
     # 检查配额
-    # 配额在北京时间 15:00 (UTC 07:00) 重置
-    now = datetime.utcnow()
-    reset_time_utc = now.replace(hour=7, minute=0, second=0, microsecond=0)
-    if now < reset_time_utc:
-        start_of_day = reset_time_utc - timedelta(days=1)
-    else:
-        start_of_day = reset_time_utc
-
-    # 获取请求的模型
-    body = await request.json()
-    model = body.get("model", "gemini-2.5-flash")
-    required_tier = CredentialPool.get_required_tier(model)
-    
-    # 检查用户凭证情况
-    from app.models.user import Credential
-    
-    # 统计用户的 2.5 和 3.0 凭证数量
-    cred_25_result = await db.execute(
-        select(func.count(Credential.id))
-        .where(Credential.user_id == user.id)
-        .where(Credential.is_active == True)
-        .where(Credential.model_tier != "3")
+    today = date.today()
+    result = await db.execute(
+        select(func.count(UsageLog.id))
+        .where(UsageLog.user_id == user.id)
+        .where(func.date(UsageLog.created_at) == today)
     )
-    cred_25_count = cred_25_result.scalar() or 0
+    today_usage = result.scalar() or 0
     
-    cred_30_result = await db.execute(
-        select(func.count(Credential.id))
-        .where(Credential.user_id == user.id)
-        .where(Credential.is_active == True)
-        .where(Credential.model_tier == "3")
-    )
-    cred_30_count = cred_30_result.scalar() or 0
-    
-    total_cred_count = cred_25_count + cred_30_count
-    has_credential = total_cred_count > 0
-
-    # 计算用户各类模型的配额上限
-    # 优先使用用户设置的按模型配额，0表示使用系统默认
-    if user.quota_flash and user.quota_flash > 0:
-        user_quota_flash = user.quota_flash
-    elif has_credential:
-        user_quota_flash = total_cred_count * settings.quota_flash
-    else:
-        user_quota_flash = settings.no_cred_quota_flash
-    
-    if user.quota_25pro and user.quota_25pro > 0:
-        user_quota_25pro = user.quota_25pro
-    elif has_credential:
-        user_quota_25pro = total_cred_count * settings.quota_25pro
-    else:
-        user_quota_25pro = settings.no_cred_quota_25pro
-    
-    if user.quota_30pro and user.quota_30pro > 0:
-        user_quota_30pro = user.quota_30pro
-    elif cred_30_count > 0:
-        user_quota_30pro = cred_30_count * settings.quota_30pro
-    elif has_credential:
-        user_quota_30pro = settings.cred25_quota_30pro
-    else:
-        user_quota_30pro = settings.no_cred_quota_30pro
-
-    # 确定当前请求的模型类别和对应配额
-    if required_tier == "3":
-        quota_limit = user_quota_30pro
-        model_filter = UsageLog.model.like('%3%')
-        quota_name = "3.0模型"
-    elif "pro" in model.lower():
-        quota_limit = user_quota_25pro
-        model_filter = UsageLog.model.like('%pro%')
-        quota_name = "2.5 Pro模型"
-    else:
-        quota_limit = user_quota_flash
-        model_filter = UsageLog.model.notlike('%pro%')
-        quota_name = "Flash模型"
-
-    # 检查该类别模型的使用量
-    if quota_limit > 0:
-        model_usage_result = await db.execute(
-            select(func.count(UsageLog.id)).where(
-                UsageLog.user_id == user.id,
-                UsageLog.created_at >= start_of_day,
-                model_filter
-            )
-        )
-        current_usage = model_usage_result.scalar() or 0
-        if current_usage >= quota_limit:
-            raise HTTPException(
-                status_code=429, 
-                detail=f"已达到{quota_name}每日配额限制 ({current_usage}/{quota_limit})"
-            )
-    elif quota_limit == 0 and required_tier == "3":
-        # 没有 3.0 配额但尝试使用 3.0 模型
-        raise HTTPException(status_code=403, detail="无 3.0 模型使用配额")
-    
-    # 同时检查总配额
-    if has_credential:
-        total_usage_result = await db.execute(
-            select(func.count(UsageLog.id))
-            .where(UsageLog.user_id == user.id)
-            .where(UsageLog.created_at >= start_of_day)
-        )
-        if (total_usage_result.scalar() or 0) >= user.daily_quota:
-            raise HTTPException(status_code=429, detail="已达到今日总配额限制")
+    if today_usage >= user.daily_quota:
+        raise HTTPException(status_code=429, detail="已达到今日配额限制")
     
     return user
 
@@ -176,24 +75,14 @@ async def options_handler():
 
 @router.get("/v1/models")
 @router.get("/models")
-async def list_models(request: Request, user: User = Depends(get_user_from_api_key), db: AsyncSession = Depends(get_db)):
+async def list_models(user: User = Depends(get_user_from_api_key)):
     """列出可用模型 (OpenAI兼容)"""
-    from app.models.user import Credential
-    
-    # 检查是否有可用的 3.0 凭证
-    has_tier3_creds = await CredentialPool.has_tier3_credentials(user, db)
-    
-    has_tier3 = await CredentialPool.has_tier3_credentials(user, db)
-    
     # 基础模型 (Gemini 2.5+)
     base_models = [
         "gemini-2.5-pro",
-        "gemini-2.5-flash",
+        "gemini-2.5-flash", 
+        "gemini-3-pro-preview",
     ]
-    
-    # 只有有 3.0 凭证时才添加 3.0 模型
-    if has_tier3:
-        base_models.append("gemini-3-pro-preview")
     
     # Thinking 后缀
     thinking_suffixes = ["-maxthinking", "-nothinking"]
@@ -260,22 +149,21 @@ async def chat_completions(
     # 检查用户是否参与大锅饭
     user_has_public = await CredentialPool.check_user_has_public_creds(db, user.id)
     
-    # 速率限制检查 (RPM) - 管理员豁免
-    if not user.is_admin:
-        one_minute_ago = datetime.utcnow() - timedelta(minutes=1)
-        rpm_result = await db.execute(
-            select(func.count(UsageLog.id))
-            .where(UsageLog.user_id == user.id)
-            .where(UsageLog.created_at >= one_minute_ago)
+    # 速率限制检查 (RPM)
+    one_minute_ago = datetime.utcnow() - timedelta(minutes=1)
+    rpm_result = await db.execute(
+        select(func.count(UsageLog.id))
+        .where(UsageLog.user_id == user.id)
+        .where(UsageLog.created_at >= one_minute_ago)
+    )
+    current_rpm = rpm_result.scalar() or 0
+    max_rpm = settings.contributor_rpm if user_has_public else settings.base_rpm
+    
+    if current_rpm >= max_rpm:
+        raise HTTPException(
+            status_code=429, 
+            detail=f"速率限制: {max_rpm} 次/分钟。{'上传凭证可提升至 ' + str(settings.contributor_rpm) + ' 次/分钟' if not user_has_public else ''}"
         )
-        current_rpm = rpm_result.scalar() or 0
-        max_rpm = settings.contributor_rpm if user_has_public else settings.base_rpm
-        
-        if current_rpm >= max_rpm:
-            raise HTTPException(
-                status_code=429, 
-                detail=f"速率限制: {max_rpm} 次/分钟。{'上传凭证可提升至 ' + str(settings.contributor_rpm) + ' 次/分钟' if not user_has_public else ''}"
-            )
     
     # 重试逻辑：报错时切换凭证重试
     max_retries = settings.error_retry_count
@@ -382,6 +270,7 @@ async def chat_completions(
                                 ):
                                     yield chunk
                                 yield "data: [DONE]\n\n"
+                            await CredentialPool.mark_credential_success(db, credential.id)
                             await log_usage(cred=credential)
                             return  # 成功，退出
                         except Exception as e:
@@ -390,7 +279,7 @@ async def chat_completions(
                             last_error = error_str
                             
                             # 检查是否应该重试（404、500、503 等错误）
-                            should_retry = any(code in error_str for code in ["404", "500", "503", "429", "RESOURCE_EXHAUSTED", "NOT_FOUND", "ECONNRESET", "socket hang up", "ConnectionReset", "Connection reset", "ETIMEDOUT", "ECONNREFUSED"])
+                            should_retry = any(code in error_str for code in ["404", "500", "503", "429", "RESOURCE_EXHAUSTED", "NOT_FOUND"])
                             
                             if should_retry and stream_retry < max_retries:
                                 print(f"[Proxy] ⚠️ 流式请求失败: {error_str}，切换凭证重试 ({stream_retry + 2}/{max_retries + 1})", flush=True)
@@ -428,6 +317,7 @@ async def chat_completions(
                     messages=messages,
                     **{k: v for k, v in body.items() if k not in ["model", "messages", "stream"]}
                 )
+                await CredentialPool.mark_credential_success(db, credential.id)
                 await log_usage()
                 return JSONResponse(content=result)
         
@@ -437,7 +327,7 @@ async def chat_completions(
             last_error = error_str
             
             # 检查是否应该重试
-            should_retry = any(code in error_str for code in ["404", "500", "503", "429", "RESOURCE_EXHAUSTED", "NOT_FOUND", "ECONNRESET", "socket hang up", "ConnectionReset", "Connection reset", "ETIMEDOUT", "ECONNREFUSED"])
+            should_retry = any(code in error_str for code in ["404", "500", "503", "429", "RESOURCE_EXHAUSTED", "NOT_FOUND"])
             
             if should_retry and retry_attempt < max_retries:
                 print(f"[Proxy] ⚠️ 请求失败: {error_str}，切换凭证重试 ({retry_attempt + 2}/{max_retries + 1})", flush=True)
@@ -467,14 +357,12 @@ async def gemini_options_handler(model: str):
 
 @router.get("/v1beta/models")
 @router.get("/v1/v1beta/models")
-async def list_gemini_models(request: Request, user: User = Depends(get_user_from_api_key), db: AsyncSession = Depends(get_db)):
+async def list_gemini_models(user: User = Depends(get_user_from_api_key)):
     """Gemini 格式模型列表"""
-    # 检查是否有可用的 3.0 凭证
-    has_tier3 = await CredentialPool.has_tier3_credentials(user, db)
-    
-    base_models = ["gemini-2.5-pro", "gemini-2.5-flash"]
-    if has_tier3:
-        base_models.append("gemini-3-pro-preview")
+    base_models = [
+        "gemini-2.5-pro", "gemini-2.5-flash", 
+        "gemini-3-pro-preview",
+    ]
     
     models = []
     for base in base_models:
@@ -519,19 +407,18 @@ async def gemini_generate_content(
     # 检查用户是否参与大锅饭
     user_has_public = await CredentialPool.check_user_has_public_creds(db, user.id)
     
-    # 速率限制 - 管理员豁免
-    if not user.is_admin:
-        one_minute_ago = datetime.utcnow() - timedelta(minutes=1)
-        rpm_result = await db.execute(
-            select(func.count(UsageLog.id))
-            .where(UsageLog.user_id == user.id)
-            .where(UsageLog.created_at >= one_minute_ago)
-        )
-        current_rpm = rpm_result.scalar() or 0
-        max_rpm = settings.contributor_rpm if user_has_public else settings.base_rpm
-        
-        if current_rpm >= max_rpm:
-            raise HTTPException(status_code=429, detail=f"速率限制: {max_rpm} 次/分钟")
+    # 速率限制
+    one_minute_ago = datetime.utcnow() - timedelta(minutes=1)
+    rpm_result = await db.execute(
+        select(func.count(UsageLog.id))
+        .where(UsageLog.user_id == user.id)
+        .where(UsageLog.created_at >= one_minute_ago)
+    )
+    current_rpm = rpm_result.scalar() or 0
+    max_rpm = settings.contributor_rpm if user_has_public else settings.base_rpm
+    
+    if current_rpm >= max_rpm:
+        raise HTTPException(status_code=429, detail=f"速率限制: {max_rpm} 次/分钟")
     
     # 获取凭证
     credential = await CredentialPool.get_available_credential(
@@ -590,18 +477,9 @@ async def gemini_generate_content(
                 await log_usage(response.status_code)
                 raise HTTPException(status_code=response.status_code, detail=response.text)
             
+            await CredentialPool.mark_credential_success(db, credential.id)
             await log_usage()
-            
-            # 转换响应格式：从内部格式转为标准 Gemini API 格式
-            result = response.json()
-            if "response" in result:
-                # 内部 API 格式: {"response": {"candidates": [...]}, "modelVersion": "..."}
-                # 转为标准格式: {"candidates": [...], "modelVersion": "..."}
-                standard_result = result.get("response", {})
-                if "modelVersion" in result:
-                    standard_result["modelVersion"] = result["modelVersion"]
-                return JSONResponse(content=standard_result)
-            return JSONResponse(content=result)
+            return JSONResponse(content=response.json())
     
     except HTTPException:
         raise
@@ -639,19 +517,18 @@ async def gemini_stream_generate_content(
     # 检查用户是否参与大锅饭
     user_has_public = await CredentialPool.check_user_has_public_creds(db, user.id)
     
-    # 速率限制 - 管理员豁免
-    if not user.is_admin:
-        one_minute_ago = datetime.utcnow() - timedelta(minutes=1)
-        rpm_result = await db.execute(
-            select(func.count(UsageLog.id))
-            .where(UsageLog.user_id == user.id)
-            .where(UsageLog.created_at >= one_minute_ago)
-        )
-        current_rpm = rpm_result.scalar() or 0
-        max_rpm = settings.contributor_rpm if user_has_public else settings.base_rpm
-        
-        if current_rpm >= max_rpm:
-            raise HTTPException(status_code=429, detail=f"速率限制: {max_rpm} 次/分钟")
+    # 速率限制
+    one_minute_ago = datetime.utcnow() - timedelta(minutes=1)
+    rpm_result = await db.execute(
+        select(func.count(UsageLog.id))
+        .where(UsageLog.user_id == user.id)
+        .where(UsageLog.created_at >= one_minute_ago)
+    )
+    current_rpm = rpm_result.scalar() or 0
+    max_rpm = settings.contributor_rpm if user_has_public else settings.base_rpm
+    
+    if current_rpm >= max_rpm:
+        raise HTTPException(status_code=429, detail=f"速率限制: {max_rpm} 次/分钟")
     
     # 获取凭证
     credential = await CredentialPool.get_available_credential(
@@ -712,23 +589,9 @@ async def gemini_stream_generate_content(
                     
                     async for line in response.aiter_lines():
                         if line:
-                            # 转换 SSE 数据格式
-                            if line.startswith("data: "):
-                                try:
-                                    data = json.loads(line[6:])
-                                    if "response" in data:
-                                        # 转换格式
-                                        standard_data = data.get("response", {})
-                                        if "modelVersion" in data:
-                                            standard_data["modelVersion"] = data["modelVersion"]
-                                        yield f"data: {json.dumps(standard_data)}\n\n"
-                                    else:
-                                        yield f"{line}\n"
-                                except:
-                                    yield f"{line}\n"
-                            else:
-                                yield f"{line}\n"
+                            yield f"{line}\n"
             
+            await CredentialPool.mark_credential_success(db, credential.id)
             await log_usage()
         except Exception as e:
             await CredentialPool.handle_credential_failure(db, credential.id, str(e))
@@ -740,138 +603,3 @@ async def gemini_stream_generate_content(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
     )
-
-
-# ===== OpenAI 原生反代 =====
-
-@router.api_route("/openai/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
-async def openai_proxy(
-    path: str,
-    request: Request,
-    user: User = Depends(get_user_from_api_key),
-    db: AsyncSession = Depends(get_db)
-):
-    """OpenAI 原生 API 反代 - 直接转发到 OpenAI"""
-    import httpx
-    
-    if not settings.openai_api_key:
-        raise HTTPException(status_code=503, detail="未配置 OpenAI API Key，无法使用 OpenAI 反代")
-    
-    start_time = time.time()
-    
-    # 检查速率限制 - 管理员豁免
-    user_has_public = await CredentialPool.check_user_has_public_creds(db, user.id)
-    if not user.is_admin:
-        one_minute_ago = datetime.utcnow() - timedelta(minutes=1)
-        rpm_result = await db.execute(
-            select(func.count(UsageLog.id))
-            .where(UsageLog.user_id == user.id)
-            .where(UsageLog.created_at >= one_minute_ago)
-        )
-        current_rpm = rpm_result.scalar() or 0
-        max_rpm = settings.contributor_rpm if user_has_public else settings.base_rpm
-        
-        if current_rpm >= max_rpm:
-            raise HTTPException(status_code=429, detail=f"速率限制: {max_rpm} 次/分钟")
-    
-    # 构建目标 URL
-    target_url = f"{settings.openai_api_base}/{path}"
-    if request.query_params:
-        target_url += f"?{request.query_params}"
-    
-    # 获取请求体
-    body = None
-    if request.method in ["POST", "PUT", "PATCH"]:
-        body = await request.body()
-    
-    # 构建请求头（替换 Authorization）
-    headers = dict(request.headers)
-    headers["Authorization"] = f"Bearer {settings.openai_api_key}"
-    # 移除 host 头
-    headers.pop("host", None)
-    headers.pop("Host", None)
-    
-    # 记录日志
-    async def log_usage(status_code: int = 200):
-        latency = (time.time() - start_time) * 1000
-        log = UsageLog(
-            user_id=user.id,
-            credential_id=None,
-            model="openai",
-            endpoint=f"/openai/{path}",
-            status_code=status_code,
-            latency_ms=latency
-        )
-        db.add(log)
-        await db.commit()
-        await notify_log_update({
-            "username": user.username,
-            "model": "openai",
-            "status_code": status_code,
-            "latency_ms": round(latency, 0),
-            "created_at": datetime.utcnow().isoformat()
-        })
-        await notify_stats_update()
-    
-    # 判断是否是流式请求
-    is_stream = False
-    if body:
-        try:
-            body_json = json.loads(body)
-            is_stream = body_json.get("stream", False)
-        except:
-            pass
-    
-    print(f"[OpenAI Proxy] {request.method} {target_url}, stream={is_stream}", flush=True)
-    
-    try:
-        if is_stream:
-            # 流式响应
-            async def stream_generator():
-                try:
-                    async with httpx.AsyncClient(timeout=120.0) as client:
-                        async with client.stream(
-                            request.method, target_url,
-                            headers=headers,
-                            content=body
-                        ) as response:
-                            if response.status_code != 200:
-                                error = await response.aread()
-                                await log_usage(response.status_code)
-                                yield f"data: {json.dumps({'error': error.decode()})}\n\n"
-                                return
-                            
-                            async for line in response.aiter_lines():
-                                if line:
-                                    yield f"{line}\n"
-                    
-                    await log_usage()
-                except Exception as e:
-                    await log_usage(500)
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
-            
-            return StreamingResponse(
-                stream_generator(),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
-            )
-        else:
-            # 非流式响应
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.request(
-                    request.method, target_url,
-                    headers=headers,
-                    content=body
-                )
-                
-                await log_usage(response.status_code)
-                
-                # 返回响应
-                return JSONResponse(
-                    content=response.json() if response.headers.get("content-type", "").startswith("application/json") else {"text": response.text},
-                    status_code=response.status_code
-                )
-    
-    except Exception as e:
-        await log_usage(500)
-        raise HTTPException(status_code=500, detail=f"OpenAI API 请求失败: {str(e)}")
