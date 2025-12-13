@@ -407,8 +407,12 @@ export default function Dashboard() {
               </div>
               <div className="bg-dark-800 border border-dark-600 rounded-xl p-4 text-center">
                 <Activity className="w-6 h-6 text-green-400 mx-auto mb-2" />
-                <div className="text-xl font-bold">{stats?.today_requests || '-'}</div>
-                <div className="text-gray-400 text-sm">今日请求</div>
+                <div className="text-xl font-bold">
+                  <span className="text-green-400">{stats?.today_success ?? '-'}</span>
+                  <span className="text-gray-500"> / </span>
+                  <span className="text-red-400">{stats?.today_failed ?? 0}</span>
+                </div>
+                <div className="text-gray-400 text-sm">成功/失败</div>
               </div>
             </div>
           </>

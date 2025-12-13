@@ -91,7 +91,7 @@ async def health():
 @app.get("/api/public/stats")
 async def public_stats():
     """公共统计信息（无需登录）"""
-    from sqlalchemy import select, func
+    from sqlalchemy import select, func, and_
     from app.models.user import User, Credential, UsageLog
     from datetime import date
     
@@ -101,22 +101,25 @@ async def public_stats():
             select(func.count(Credential.id)).where(Credential.is_active == True)
         )).scalar() or 0
         today = date.today()
-        today_requests = (await db.execute(
-            select(func.count(UsageLog.id)).where(func.date(UsageLog.created_at) == today)
+        
+        # 今日成功请求 (status_code 200)
+        today_success = (await db.execute(
+            select(func.count(UsageLog.id)).where(
+                and_(func.date(UsageLog.created_at) == today, UsageLog.status_code == 200)
+            )
         )).scalar() or 0
         
-        # 成功/失败统计
-        today_success = (await db.execute(
-            select(func.count(UsageLog.id))
-            .where(func.date(UsageLog.created_at) == today)
-            .where(UsageLog.status_code == 200)
+        # 今日失败请求 (status_code != 200)
+        today_failed = (await db.execute(
+            select(func.count(UsageLog.id)).where(
+                and_(func.date(UsageLog.created_at) == today, UsageLog.status_code != 200)
+            )
         )).scalar() or 0
-        today_failed = today_requests - today_success
         
         return {
             "user_count": user_count,
             "active_credentials": active_credentials,
-            "today_requests": today_requests,
+            "today_requests": today_success + today_failed,
             "today_success": today_success,
             "today_failed": today_failed
         }
