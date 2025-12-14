@@ -220,13 +220,16 @@ async def get_me(user: User = Depends(get_current_user), db: AsyncSession = Depe
     else:
         quota_30pro = settings.no_cred_quota_30pro
     
+    # 总配额 = 三个模型配额之和
+    total_quota = quota_flash + quota_25pro + quota_30pro
+    
     return {
         "id": user.id,
         "username": user.username,
         "email": user.email,
         "is_admin": user.is_admin,
         "is_active": user.is_active,
-        "daily_quota": user.daily_quota,
+        "daily_quota": total_quota,
         "today_usage": today_usage,
         "credential_count": credential_count,
         "public_credential_count": public_credential_count,
@@ -983,10 +986,52 @@ async def get_discord_user_key(discord_id: str, db: AsyncSession = Depends(get_d
     )
     today_usage = usage_result.scalar() or 0
     
+    # 计算真实配额
+    from app.models.user import Credential
+    cred_result = await db.execute(
+        select(func.count(Credential.id))
+        .where(Credential.user_id == user.id)
+        .where(Credential.is_active == True)
+    )
+    cred_count = cred_result.scalar() or 0
+    
+    cred_30_result = await db.execute(
+        select(func.count(Credential.id))
+        .where(Credential.user_id == user.id)
+        .where(Credential.is_active == True)
+        .where(Credential.model_tier == "3")
+    )
+    cred_30_count = cred_30_result.scalar() or 0
+    
+    if user.quota_flash and user.quota_flash > 0:
+        quota_flash = user.quota_flash
+    elif cred_count > 0:
+        quota_flash = cred_count * settings.quota_flash
+    else:
+        quota_flash = settings.no_cred_quota_flash
+    
+    if user.quota_25pro and user.quota_25pro > 0:
+        quota_25pro = user.quota_25pro
+    elif cred_count > 0:
+        quota_25pro = cred_count * settings.quota_25pro
+    else:
+        quota_25pro = settings.no_cred_quota_25pro
+    
+    if user.quota_30pro and user.quota_30pro > 0:
+        quota_30pro = user.quota_30pro
+    elif cred_30_count > 0:
+        quota_30pro = cred_30_count * settings.quota_30pro
+    elif cred_count > 0:
+        quota_30pro = settings.cred25_quota_30pro
+    else:
+        quota_30pro = settings.no_cred_quota_30pro
+    
+    total_quota = quota_flash + quota_25pro + quota_30pro
+    
     return {
         "username": user.username,
         "api_key": api_key.key,
-        "daily_quota": user.daily_quota,
+        "daily_quota": total_quota,
         "today_usage": today_usage
     }
 
@@ -1049,15 +1094,52 @@ async def get_discord_user_stats(discord_id: str, db: AsyncSession = Depends(get
     
     # 凭证数量
     cred_result = await db.execute(
-        select(func.count(Credential.id)).where(Credential.user_id == user.id)
+        select(func.count(Credential.id))
+        .where(Credential.user_id == user.id)
+        .where(Credential.is_active == True)
     )
     credentials_count = cred_result.scalar() or 0
+    
+    # 3.0凭证数量
+    cred_30_result = await db.execute(
+        select(func.count(Credential.id))
+        .where(Credential.user_id == user.id)
+        .where(Credential.is_active == True)
+        .where(Credential.model_tier == "3")
+    )
+    cred_30_count = cred_30_result.scalar() or 0
+    
+    # 计算真实配额
+    if user.quota_flash and user.quota_flash > 0:
+        quota_flash = user.quota_flash
+    elif credentials_count > 0:
+        quota_flash = credentials_count * settings.quota_flash
+    else:
+        quota_flash = settings.no_cred_quota_flash
+    
+    if user.quota_25pro and user.quota_25pro > 0:
+        quota_25pro = user.quota_25pro
+    elif credentials_count > 0:
+        quota_25pro = credentials_count * settings.quota_25pro
+    else:
+        quota_25pro = settings.no_cred_quota_25pro
+    
+    if user.quota_30pro and user.quota_30pro > 0:
+        quota_30pro = user.quota_30pro
+    elif cred_30_count > 0:
+        quota_30pro = cred_30_count * settings.quota_30pro
+    elif credentials_count > 0:
+        quota_30pro = settings.cred25_quota_30pro
+    else:
+        quota_30pro = settings.no_cred_quota_30pro
+    
+    total_quota = quota_flash + quota_25pro + quota_30pro
     
     return {
         "username": user.username,
         "discord_id": user.discord_id,
         "discord_name": user.discord_name,
-        "daily_quota": user.daily_quota,
+        "daily_quota": total_quota,
         "today_usage": today_usage,
         "total_requests": total_requests,
         "credentials_count": credentials_count,
