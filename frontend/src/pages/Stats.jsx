@@ -139,22 +139,55 @@ export default function Stats() {
               </div>
             </div>
 
-            {/* 总配额汇总 */}
-            <div className="bg-gray-700/30 rounded-lg p-3 mb-4 text-center">
-              <span className="text-gray-400">总配额计算: </span>
-              <span className="text-cyan-400">{globalStats.total_quota?.flash ?? 0}</span>
-              <span className="text-gray-500"> + </span>
-              <span className="text-orange-400">{globalStats.total_quota?.['pro_2.5'] ?? 0}</span>
-              <span className="text-gray-500"> + </span>
-              <span className="text-pink-400">{globalStats.total_quota?.tier_3 ?? 0}</span>
-              <span className="text-gray-500"> = </span>
-              <span className="text-xl font-bold text-green-400">
-                {(globalStats.total_quota?.flash ?? 0) + (globalStats.total_quota?.['pro_2.5'] ?? 0) + (globalStats.total_quota?.tier_3 ?? 0)} 总配额
-              </span>
-            </div>
+            {/* 按用户类型的配额分解 */}
+            {globalStats.quota_breakdown && (
+              <div className="bg-gray-700/30 rounded-lg p-4 mb-4">
+                <div className="text-sm text-gray-400 mb-3">📊 按用户类型配额分解</div>
+                <div className="grid grid-cols-3 gap-3 text-sm mb-3">
+                  <div className="bg-gray-600/30 rounded p-2">
+                    <div className="text-gray-400 text-xs mb-1">🔒 无凭证用户 ({globalStats.user_counts?.no_cred ?? 0}人)</div>
+                    <div className="flex justify-between">
+                      <span className="text-cyan-300">{globalStats.quota_breakdown?.no_cred?.flash ?? 0}</span>
+                      <span className="text-orange-300">{globalStats.quota_breakdown?.no_cred?.['pro_2.5'] ?? 0}</span>
+                      <span className="text-pink-300">{globalStats.quota_breakdown?.no_cred?.tier_3 ?? 0}</span>
+                    </div>
+                  </div>
+                  <div className="bg-gray-600/30 rounded p-2">
+                    <div className="text-gray-400 text-xs mb-1">📘 2.5凭证用户 ({globalStats.user_counts?.cred_25_only ?? 0}人)</div>
+                    <div className="flex justify-between">
+                      <span className="text-cyan-300">{globalStats.quota_breakdown?.cred_25?.flash ?? 0}</span>
+                      <span className="text-orange-300">{globalStats.quota_breakdown?.cred_25?.['pro_2.5'] ?? 0}</span>
+                      <span className="text-pink-300">{globalStats.quota_breakdown?.cred_25?.tier_3 ?? 0}</span>
+                    </div>
+                  </div>
+                  <div className="bg-gray-600/30 rounded p-2">
+                    <div className="text-gray-400 text-xs mb-1">💎 3.0凭证用户 ({globalStats.user_counts?.cred_30 ?? 0}人)</div>
+                    <div className="flex justify-between">
+                      <span className="text-cyan-300">{globalStats.quota_breakdown?.cred_30?.flash ?? 0}</span>
+                      <span className="text-orange-300">{globalStats.quota_breakdown?.cred_30?.['pro_2.5'] ?? 0}</span>
+                      <span className="text-pink-300">{globalStats.quota_breakdown?.cred_30?.tier_3 ?? 0}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="text-center border-t border-gray-600 pt-3">
+                  <span className="text-gray-400">总配额: </span>
+                  <span className="text-cyan-400">{globalStats.total_quota?.flash ?? 0}</span>
+                  <span className="text-gray-500"> + </span>
+                  <span className="text-orange-400">{globalStats.total_quota?.['pro_2.5'] ?? 0}</span>
+                  <span className="text-gray-500"> + </span>
+                  <span className="text-pink-400">{globalStats.total_quota?.tier_3 ?? 0}</span>
+                  <span className="text-gray-500"> = </span>
+                  <span className="text-xl font-bold text-green-400">
+                    {(globalStats.total_quota?.flash ?? 0) + (globalStats.total_quota?.['pro_2.5'] ?? 0) + (globalStats.total_quota?.tier_3 ?? 0)}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* 凭证状态 */}
             <div className="flex items-center gap-4 text-sm text-gray-400">
+              <span>用户: {globalStats.user_counts?.total ?? 0}</span>
+              <span>•</span>
               <span>凭证: {globalStats.credentials.active}/{globalStats.credentials.total} 活跃</span>
               <span>•</span>
               <span>公共池: {globalStats.credentials.public}</span>
