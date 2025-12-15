@@ -368,7 +368,7 @@ async def start_all_credentials(
         async with async_session() as session:
             for res in results:
                 if res["token"]:
-                    await session.execute(
+                    result = await session.execute(
                         update(Credential)
                         .where(Credential.id == res["id"])
                         .values(
@@ -377,8 +377,13 @@ async def start_all_credentials(
                             last_error=None
                         )
                     )
-                    success += 1
-                    print(f"[启动凭证] ✅ {res['email']}", flush=True)
+                    # 检查是否实际更新了行
+                    if result.rowcount > 0:
+                        success += 1
+                        print(f"[启动凭证] ✅ {res['email']}", flush=True)
+                    else:
+                        failed += 1
+                        print(f"[启动凭证] ⚠️ {res['email']} Token获取成功但数据库更新失败(凭证可能已被删除)", flush=True)
                 else:
                     failed += 1
             await session.commit()
@@ -508,20 +513,24 @@ async def verify_all_credentials(
                     from app.services.crypto import encrypt_credential
                     update_vals["api_key"] = encrypt_credential(res["token"])
                 
-                await session.execute(
+                result = await session.execute(
                     update(Credential).where(Credential.id == res["id"]).values(**update_vals)
                 )
                 
-                if res["is_valid"]:
-                    valid += 1
-                    if res["supports_3"]:
-                        tier3 += 1
-                    if res["account_type"] == "pro":
-                        pro += 1
-                    print(f"[检测] ✅ {res['email']} tier={model_tier}", flush=True)
+                # 检查是否实际更新了行
+                if result.rowcount > 0:
+                    if res["is_valid"]:
+                        valid += 1
+                        if res["supports_3"]:
+                            tier3 += 1
+                        if res["account_type"] == "pro":
+                            pro += 1
+                        print(f"[检测] ✅ {res['email']} tier={model_tier}", flush=True)
+                    else:
+                        invalid += 1
+                        print(f"[检测] ❌ {res['email']}", flush=True)
                 else:
-                    invalid += 1
-                    print(f"[检测] ❌ {res['email']}", flush=True)
+                    print(f"[检测] ⚠️ {res['email']} 数据库更新失败(凭证可能已被删除)", flush=True)
             
             await session.commit()
         
