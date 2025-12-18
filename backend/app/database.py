@@ -7,7 +7,7 @@ import os
 # 确保数据目录存在
 os.makedirs("data", exist_ok=True)
 
-# SQLite优化配置：WAL模式、更长超时、连接池
+# SQLite优化配置：WAL模式、更长超时、连接池、自动重连
 engine = create_async_engine(
     settings.database_url, 
     echo=False,
@@ -16,6 +16,7 @@ engine = create_async_engine(
         "check_same_thread": False
     },
     poolclass=StaticPool,  # 使用静态连接池避免连接问题
+    pool_pre_ping=True,  # 自动检测断开的连接并重连
 )
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
