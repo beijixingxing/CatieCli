@@ -300,7 +300,7 @@ export default function Admin() {
       const res = await api.delete('/api/admin/credential-duplicates')
       showAlert('清除成功', res.data.message, 'success')
       setDuplicateModal({ open: false, data: null, loading: false })
-      fetchCredentials()
+      fetchData()
     } catch (err) {
       setDuplicateModal(prev => ({ ...prev, loading: false }))
       showAlert('清除失败', err.response?.data?.detail || err.message, 'error')
