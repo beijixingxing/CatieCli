@@ -13,6 +13,7 @@ from app.services.auth import get_user_by_api_key
 from app.services.credential_pool import CredentialPool
 from app.services.gemini_client import GeminiClient
 from app.services.websocket import notify_log_update, notify_stats_update
+from app.services.redis_cache import RedisClient
 from app.config import settings
 import re
 
@@ -297,20 +298,21 @@ async def chat_completions(
     
     # 速率限制检查 (RPM) - 管理员豁免
     if not user.is_admin:
-        one_minute_ago = datetime.utcnow() - timedelta(minutes=1)
-        rpm_result = await db.execute(
-            select(func.count(UsageLog.id))
-            .where(UsageLog.user_id == user.id)
-            .where(UsageLog.created_at >= one_minute_ago)
-        )
-        current_rpm = rpm_result.scalar() or 0
+        # 使用 Redis 计数器替代数据库查询
+        rpm_key = f"rpm:{user.id}"
+        current_rpm = await RedisClient.get(rpm_key)
+        current_rpm = int(current_rpm) if current_rpm else 0
+        
         max_rpm = settings.contributor_rpm if user_has_public else settings.base_rpm
         
         if current_rpm >= max_rpm:
             raise HTTPException(
-                status_code=429, 
+                status_code=429,
                 detail=f"速率限制: {max_rpm} 次/分钟。{'上传凭证可提升至 ' + str(settings.contributor_rpm) + ' 次/分钟' if not user_has_public else ''}"
             )
+        
+        # 增加计数（过期时间 60 秒）
+        await RedisClient.incr(rpm_key, expire=60)
     
     # 重试逻辑：报错时切换凭证重试
     max_retries = settings.error_retry_count
@@ -563,17 +565,18 @@ async def gemini_generate_content(
     
     # 速率限制 - 管理员豁免
     if not user.is_admin:
-        one_minute_ago = datetime.utcnow() - timedelta(minutes=1)
-        rpm_result = await db.execute(
-            select(func.count(UsageLog.id))
-            .where(UsageLog.user_id == user.id)
-            .where(UsageLog.created_at >= one_minute_ago)
-        )
-        current_rpm = rpm_result.scalar() or 0
+        # 使用 Redis 计数器
+        rpm_key = f"rpm:{user.id}"
+        current_rpm = await RedisClient.get(rpm_key)
+        current_rpm = int(current_rpm) if current_rpm else 0
+        
         max_rpm = settings.contributor_rpm if user_has_public else settings.base_rpm
         
         if current_rpm >= max_rpm:
             raise HTTPException(status_code=429, detail=f"速率限制: {max_rpm} 次/分钟")
+        
+        # 增加计数
+        await RedisClient.incr(rpm_key, expire=60)
     
     # 获取凭证
     credential = await CredentialPool.get_available_credential(
@@ -693,17 +696,18 @@ async def gemini_stream_generate_content(
     
     # 速率限制 - 管理员豁免
     if not user.is_admin:
-        one_minute_ago = datetime.utcnow() - timedelta(minutes=1)
-        rpm_result = await db.execute(
-            select(func.count(UsageLog.id))
-            .where(UsageLog.user_id == user.id)
-            .where(UsageLog.created_at >= one_minute_ago)
-        )
-        current_rpm = rpm_result.scalar() or 0
+        # 使用 Redis 计数器
+        rpm_key = f"rpm:{user.id}"
+        current_rpm = await RedisClient.get(rpm_key)
+        current_rpm = int(current_rpm) if current_rpm else 0
+        
         max_rpm = settings.contributor_rpm if user_has_public else settings.base_rpm
         
         if current_rpm >= max_rpm:
             raise HTTPException(status_code=429, detail=f"速率限制: {max_rpm} 次/分钟")
+        
+        # 增加计数
+        await RedisClient.incr(rpm_key, expire=60)
     
     # 获取凭证
     credential = await CredentialPool.get_available_credential(
@@ -826,17 +830,18 @@ async def openai_proxy(
     # 检查速率限制 - 管理员豁免
     user_has_public = await CredentialPool.check_user_has_public_creds(db, user.id)
     if not user.is_admin:
-        one_minute_ago = datetime.utcnow() - timedelta(minutes=1)
-        rpm_result = await db.execute(
-            select(func.count(UsageLog.id))
-            .where(UsageLog.user_id == user.id)
-            .where(UsageLog.created_at >= one_minute_ago)
-        )
-        current_rpm = rpm_result.scalar() or 0
+        # 使用 Redis 计数器
+        rpm_key = f"rpm:{user.id}"
+        current_rpm = await RedisClient.get(rpm_key)
+        current_rpm = int(current_rpm) if current_rpm else 0
+        
         max_rpm = settings.contributor_rpm if user_has_public else settings.base_rpm
         
         if current_rpm >= max_rpm:
             raise HTTPException(status_code=429, detail=f"速率限制: {max_rpm} 次/分钟")
+        
+        # 增加计数
+        await RedisClient.incr(rpm_key, expire=60)
     
     # 构建目标 URL
     target_url = f"{settings.openai_api_base}/{path}"
