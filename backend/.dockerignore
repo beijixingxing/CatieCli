@@ -1,7 +1,7 @@
 __pycache__
 *.pyc
 *.pyo
-.env
+# .env  # 注释掉这一行，允许 .env 文件被复制到容器中
 *.db
 .git
 .venv
