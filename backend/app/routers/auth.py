@@ -907,6 +907,98 @@ async def verify_my_credential(
         }
 
 
+@router.post("/credentials/{cred_id}/refresh-project-id")
+async def refresh_credential_project_id(
+    cred_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """刷新凭证的 project_id（使用 fetch_project_id 方法）"""
+    import httpx
+    from app.services.credential_pool import CredentialPool, fetch_project_id
+    
+    try:
+        print(f"[刷新项目ID] 开始刷新凭证 {cred_id} 的 project_id", flush=True)
+        
+        result = await db.execute(
+            select(Credential).where(Credential.id == cred_id, Credential.user_id == user.id)
+        )
+        cred = result.scalar_one_or_none()
+        if not cred:
+            return {"success": False, "error": "凭证不存在", "project_id": None}
+        
+        # 获取 access token
+        try:
+            access_token = await CredentialPool.get_access_token(cred, db)
+        except Exception as e:
+            print(f"[刷新项目ID] 获取 token 异常: {e}", flush=True)
+            return {"success": False, "error": f"获取 token 失败: {str(e)[:50]}", "project_id": cred.project_id}
+        
+        if not access_token:
+            return {"success": False, "error": "无法获取 access token", "project_id": cred.project_id}
+        
+        print(f"[刷新项目ID] 获取到 token，开始获取 project_id", flush=True)
+        
+        # 使用 fetch_project_id 方法获取 project_id
+        new_project_id = None
+        try:
+            new_project_id = await fetch_project_id(
+                access_token=access_token,
+                user_agent="CatieCli/1.0",
+                api_base_url="https://cloudcode-pa.googleapis.com"
+            )
+            if new_project_id:
+                print(f"[刷新项目ID] ✅ fetch_project_id 获取到: {new_project_id}", flush=True)
+        except Exception as e:
+            print(f"[刷新项目ID] fetch_project_id 失败: {e}", flush=True)
+        
+        # 如果 fetch_project_id 失败，回退到 Cloud Resource Manager API
+        if not new_project_id:
+            print(f"[刷新项目ID] 回退到 Cloud Resource Manager API...", flush=True)
+            try:
+                async with httpx.AsyncClient(timeout=15) as client:
+                    projects_response = await client.get(
+                        "https://cloudresourcemanager.googleapis.com/v1/projects",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                        params={"filter": "lifecycleState:ACTIVE"}
+                    )
+                    projects_data = projects_response.json()
+                    projects = projects_data.get("projects", [])
+                    
+                    if projects:
+                        # 选择第一个项目，或者找 default 项目
+                        for p in projects:
+                            if "default" in p.get("projectId", "").lower() or "default" in p.get("name", "").lower():
+                                new_project_id = p.get("projectId")
+                                break
+                        if not new_project_id:
+                            new_project_id = projects[0].get("projectId", "")
+                        print(f"[刷新项目ID] ✅ Cloud Resource Manager 获取到: {new_project_id}", flush=True)
+            except Exception as e:
+                print(f"[刷新项目ID] Cloud Resource Manager 失败: {e}", flush=True)
+        
+        if not new_project_id:
+            return {"success": False, "error": "无法获取 project_id", "project_id": cred.project_id}
+        
+        # 更新数据库
+        old_project_id = cred.project_id
+        cred.project_id = new_project_id
+        await db.commit()
+        
+        print(f"[刷新项目ID] 完成: {old_project_id} -> {new_project_id}", flush=True)
+        
+        return {
+            "success": True,
+            "project_id": new_project_id,
+            "old_project_id": old_project_id,
+            "message": f"项目ID已更新: {new_project_id}"
+        }
+        
+    except Exception as e:
+        print(f"[刷新项目ID] 严重异常: {e}", flush=True)
+        return {"success": False, "error": f"刷新异常: {str(e)[:50]}", "project_id": None}
+
+
 # ===== Discord Bot API =====
 
 class DiscordRegister(BaseModel):

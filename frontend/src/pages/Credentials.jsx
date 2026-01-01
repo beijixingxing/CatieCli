@@ -647,8 +647,12 @@ export default function Credentials() {
           <div className="bg-dark-800 rounded-2xl w-full max-w-md overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-dark-600">
               <h3 className="text-lg font-semibold flex items-center gap-2">
-                <CheckCircle className={verifyResult.is_valid ? "text-green-400" : "text-red-400"} />
-                凭证检测结果
+                {verifyResult.is_project_id_refresh ? (
+                  <RefreshCw className={verifyResult.is_valid ? "text-green-400" : "text-red-400"} />
+                ) : (
+                  <CheckCircle className={verifyResult.is_valid ? "text-green-400" : "text-red-400"} />
+                )}
+                {verifyResult.is_project_id_refresh ? '刷新项目ID结果' : '凭证检测结果'}
               </h3>
               <button onClick={() => setVerifyResult(null)} className="p-2 hover:bg-dark-600 rounded-lg">
                 <X size={20} />
@@ -665,9 +669,30 @@ export default function Credentials() {
                 <span className={`px-3 py-1 rounded-full text-sm font-medium ${
                   verifyResult.is_valid ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
                 }`}>
-                  {verifyResult.is_valid ? '✅ 有效' : '❌ 无效'}
+                  {verifyResult.is_project_id_refresh 
+                    ? (verifyResult.is_valid ? '✅ 刷新成功' : '❌ 刷新失败')
+                    : (verifyResult.is_valid ? '✅ 有效' : '❌ 无效')}
                 </span>
               </div>
+              
+              {/* 项目ID信息（刷新项目ID时显示） */}
+              {verifyResult.is_project_id_refresh && verifyResult.project_id && (
+                <div className="flex items-center gap-3">
+                  <span className="text-gray-400">项目ID</span>
+                  <span className="px-3 py-1 rounded-full text-sm font-medium bg-orange-500/20 text-orange-400">
+                    {verifyResult.project_id}
+                  </span>
+                </div>
+              )}
+              
+              {verifyResult.is_project_id_refresh && verifyResult.old_project_id && verifyResult.is_valid && (
+                <div className="flex items-center gap-3">
+                  <span className="text-gray-400">旧ID</span>
+                  <span className="px-3 py-1 rounded-full text-sm font-medium bg-gray-600/50 text-gray-300 line-through">
+                    {verifyResult.old_project_id}
+                  </span>
+                </div>
+              )}
               
               {/* 模型等级 */}
               {verifyResult.model_tier && (
