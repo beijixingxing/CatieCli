@@ -7,7 +7,7 @@ from typing import Optional
 import json
 import time
 
-from app.database import get_db
+from app.database import get_db, async_session
 from app.models.user import User, UsageLog
 from app.services.auth import get_user_by_api_key
 from app.services.credential_pool import CredentialPool
@@ -413,6 +413,71 @@ async def chat_completions(
         try:
             if stream:
                 # 流式模式：使用带重试的流生成器
+                # 注意：由于流式响应返回后 FastAPI 会关闭依赖注入的 db 会话，
+                # 所以需要在生成器内部创建独立的数据库会话来记录日志
+                
+                async def log_usage_in_stream(
+                    status_code: int = 200,
+                    cred_id: int = None,
+                    cred_email: str = None,
+                    error_msg: str = None
+                ):
+                    """在流式生成器内部使用独立会话记录日志"""
+                    try:
+                        latency = (time.time() - start_time) * 1000
+                        
+                        # 错误分类
+                        error_type = None
+                        error_code = None
+                        if status_code != 200 and error_msg:
+                            error_type, error_code = classify_error_simple(status_code, error_msg)
+                        
+                        # 使用独立的数据库会话
+                        async with async_session() as stream_db:
+                            log = UsageLog(
+                                user_id=user.id,
+                                credential_id=cred_id,
+                                model=model,
+                                endpoint="/v1/chat/completions",
+                                status_code=status_code,
+                                latency_ms=latency,
+                                error_message=error_msg[:2000] if error_msg else None,
+                                error_type=error_type,
+                                error_code=error_code,
+                                credential_email=cred_email,
+                                request_body=request_body_str if status_code != 200 else None,
+                                client_ip=client_ip,
+                                user_agent=user_agent
+                            )
+                            stream_db.add(log)
+                            
+                            # 更新凭证使用次数
+                            if cred_id:
+                                from app.models.user import Credential
+                                cred_result = await stream_db.execute(
+                                    select(Credential).where(Credential.id == cred_id)
+                                )
+                                cred = cred_result.scalar_one_or_none()
+                                if cred:
+                                    cred.total_requests = (cred.total_requests or 0) + 1
+                                    cred.last_used_at = datetime.utcnow()
+                            
+                            await stream_db.commit()
+                        
+                        # WebSocket 实时通知
+                        await notify_log_update({
+                            "username": user.username,
+                            "model": model,
+                            "status_code": status_code,
+                            "error_type": error_type,
+                            "latency_ms": round(latency, 0),
+                            "created_at": datetime.utcnow().isoformat()
+                        })
+                        await notify_stats_update()
+                        print(f"[Proxy] ✅ 流式日志已记录: user={user.username}, model={model}, status={status_code}", flush=True)
+                    except Exception as log_err:
+                        print(f"[Proxy] ❌ 流式日志记录失败: {log_err}", flush=True)
+                
                 async def stream_generator_with_retry():
                     nonlocal credential, access_token, project_id, client, tried_credential_ids, last_error
                     
@@ -433,11 +498,14 @@ async def chat_completions(
                                 ):
                                     yield chunk
                                 yield "data: [DONE]\n\n"
-                            await log_usage(cred=credential)
+                            # 使用独立会话记录日志
+                            await log_usage_in_stream(cred_id=credential.id, cred_email=credential.email)
                             return  # 成功，退出
                         except Exception as e:
                             error_str = str(e)
-                            await CredentialPool.handle_credential_failure(db, credential.id, error_str)
+                            # 使用独立会话处理凭证失败
+                            async with async_session() as err_db:
+                                await CredentialPool.handle_credential_failure(err_db, credential.id, error_str)
                             last_error = error_str
                             
                             # 检查是否应该重试（404、500、503 等错误）
@@ -446,25 +514,26 @@ async def chat_completions(
                             if should_retry and stream_retry < max_retries:
                                 print(f"[Proxy] ⚠️ 流式请求失败: {error_str}，切换凭证重试 ({stream_retry + 2}/{max_retries + 1})", flush=True)
                                 
-                                # 获取新凭证
-                                new_credential = await CredentialPool.get_available_credential(
-                                    db, user_id=user.id, user_has_public_creds=user_has_public,
-                                    model=model, exclude_ids=tried_credential_ids
-                                )
-                                if new_credential:
-                                    tried_credential_ids.add(new_credential.id)
-                                    new_token = await CredentialPool.get_access_token(new_credential, db)
-                                    if new_token:
-                                        credential = new_credential
-                                        access_token = new_token
-                                        project_id = new_credential.project_id or ""
-                                        client = GeminiClient(access_token, project_id)
-                                        print(f"[Proxy] 🔄 切换到凭证: {credential.email}", flush=True)
-                                        continue
+                                # 使用独立会话获取新凭证
+                                async with async_session() as retry_db:
+                                    new_credential = await CredentialPool.get_available_credential(
+                                        retry_db, user_id=user.id, user_has_public_creds=user_has_public,
+                                        model=model, exclude_ids=tried_credential_ids
+                                    )
+                                    if new_credential:
+                                        tried_credential_ids.add(new_credential.id)
+                                        new_token = await CredentialPool.get_access_token(new_credential, retry_db)
+                                        if new_token:
+                                            credential = new_credential
+                                            access_token = new_token
+                                            project_id = new_credential.project_id or ""
+                                            client = GeminiClient(access_token, project_id)
+                                            print(f"[Proxy] 🔄 切换到凭证: {credential.email}", flush=True)
+                                            continue
                             
-                            # 无法重试，输出错误
+                            # 无法重试，输出错误并记录日志
                             status_code = extract_status_code(error_str)
-                            await log_usage(status_code, cred=credential, error_msg=error_str)
+                            await log_usage_in_stream(status_code, cred_id=credential.id, cred_email=credential.email, error_msg=error_str)
                             yield f"data: {json.dumps({'error': f'API Error (已重试 {stream_retry + 1} 次): {error_str}'})}\n\n"
                             return
                 

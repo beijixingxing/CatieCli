@@ -12,6 +12,11 @@ COPY . .
 # 创建数据目录
 RUN mkdir -p /app/data
 
+# 设置 Python 编码为 UTF-8（确保 emoji 等 Unicode 字符正常输出）
+ENV PYTHONIOENCODING=utf-8
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
 # 默认端口（可通过环境变量 PORT 覆盖，Zeabur 会自动设置为 8080）
 ENV PORT=5001
 EXPOSE 5001
