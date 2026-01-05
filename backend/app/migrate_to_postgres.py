@@ -212,21 +212,13 @@ class DatabaseMigrator:
                 result = await pg_conn.execute(text(f"SELECT * FROM {table_name} LIMIT 0"))
                 pg_columns = list(result.keys())
 
-            # 如果是 usage_logs 表，先获取所有有效的 credential_id
-            valid_credential_ids = set()
-            if table_name == "usage_logs":
-                async with self.postgres_engine.begin() as pg_conn:
-                    result = await pg_conn.execute(text("SELECT id FROM credentials"))
-                    valid_credential_ids = {row[0] for row in result.fetchall()}
-                    logger.info(f"  找到 {len(valid_credential_ids)} 个有效的 credential_id")
-
             # 构建插入语句（在循环外构建一次）
             columns_str = ", ".join(pg_columns)
             placeholders = ", ".join([f":{col}" for col in pg_columns])
             insert_sql = f"INSERT INTO {table_name} ({columns_str}) VALUES ({placeholders})"
 
-            # 对于 credentials 表，使用 ON CONFLICT DO NOTHING 避免唯一约束冲突
-            if table_name == "credentials":
+            # 对于可能有唯一约束冲突的表，使用 ON CONFLICT DO NOTHING
+            if table_name in ["users", "api_keys", "credentials"]:
                 insert_sql += " ON CONFLICT (id) DO NOTHING"
 
             # 使用批量插入
@@ -235,7 +227,6 @@ class DatabaseMigrator:
                 result = await sqlite_conn.stream(text(f"SELECT * FROM {table_name}"))
 
                 total_rows = 0
-                skipped_invalid_fk = 0
                 truncation_stats = {}  # 统计截断次数
 
                 # 使用单个事务处理多个批次，减少事务开销
@@ -243,19 +234,10 @@ class DatabaseMigrator:
                     # 流式处理数据
                     async for partition in result.partitions(batch_size):
                         batch_data = []
-                        batch_invalid_fk = 0
                         for row in partition:
                             # 转换数据类型（使用 SQLite 的列顺序读取）
                             row_dict = dict(zip(sqlite_columns, row))
                             converted = self.convert_sqlite_to_postgres_types(table_name, row_dict, truncation_stats)
-
-                            # 处理 usage_logs 的外键约束
-                            if table_name == "usage_logs" and converted.get("credential_id") is not None:
-                                if converted["credential_id"] not in valid_credential_ids:
-                                    # 将无效的 credential_id 设置为 NULL
-                                    converted["credential_id"] = None
-                                    batch_invalid_fk += 1
-                                    skipped_invalid_fk += 1
 
                             # 重新排序数据以匹配 PostgreSQL 的列顺序
                             reordered = {col: converted.get(col) for col in pg_columns}
@@ -265,20 +247,13 @@ class DatabaseMigrator:
                         # 批量插入到 PostgreSQL（复用已有的事务）
                         if batch_data:
                             await pg_conn.execute(text(insert_sql), batch_data)
-
-                            # 显示进度，包括本批次修复的外键数量
-                            if batch_invalid_fk > 0:
-                                logger.info(f"  已处理 {total_rows} 条记录 (本批次修复 {batch_invalid_fk} 条无效外键)")
-                            else:
-                                logger.info(f"  已处理 {total_rows} 条记录")
+                            logger.info(f"  已处理 {total_rows} 条记录")
 
                 if total_rows == 0:
                     logger.info(f"  ✓ {table_name}: 无数据，跳过")
                     return
 
                 logger.info(f"  ✓ 共迁移 {total_rows} 条记录")
-                if skipped_invalid_fk > 0:
-                    logger.info(f"  ⚠ 修复了 {skipped_invalid_fk} 条无效外键引用")
                 if truncation_stats:
                     logger.info(f"  ⚠ 字段截断统计: {', '.join([f'{k}({v}条)' for k, v in truncation_stats.items()])}")
 
@@ -308,19 +283,21 @@ class DatabaseMigrator:
         """
         获取表的正确迁移顺序（按外键依赖）
         返回分组的表名列表，同组的表可以并行迁移
+
+        注意：只迁移核心数据（用户、凭证、配置），跳过日志
         """
-        # 按依赖关系分组
-        # 同一组内的表没有相互依赖，可以并行迁移
+        # 按依赖关系分组 - 只迁移必要的表
         return {
-            "group_1": ["users", "system_config"],  # 无依赖，可并行
-            "group_2": ["api_keys", "credentials"],  # 依赖 users，可并行
-            "group_3": ["usage_logs"],  # 依赖前面所有表
+            "group_1": ["users", "system_config"],  # 核心：用户数据和系统配置
+            "group_2": ["api_keys", "credentials"],  # 核心：用户的 API 密钥和凭证
+            # 跳过：usage_logs（日志数据量大，不影响功能，新系统会重新记录）
         }
 
     async def migrate_all(self):
-        """执行完整迁移流程（优化版：支持并行迁移）"""
+        """执行迁移流程"""
         logger.info("=" * 60)
-        logger.info("开始数据库迁移：SQLite -> PostgreSQL (优化版)")
+        logger.info("开始数据库迁移：SQLite -> PostgreSQL")
+        logger.info("迁移范围：用户、API密钥、凭证、配置（跳过日志）")
         logger.info("=" * 60)
 
         try:
