@@ -3,7 +3,7 @@
 当检测到 PostgreSQL 配置且存在 SQLite 数据库文件时自动执行
 """
 import os
-import io
+from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
@@ -73,11 +73,12 @@ class DatabaseMigrator:
             logger.warning(f"检查 PostgreSQL 失败: {e}")
             return True
 
-    def convert_sqlite_to_postgres_types(self, table_name: str, data: dict) -> dict:
+    def convert_sqlite_to_postgres_types(self, table_name: str, data: dict, truncation_stats: dict = None) -> dict:
         """
         转换 SQLite 数据类型到 PostgreSQL 兼容类型
         :param table_name: 表名
         :param data: 数据字典
+        :param truncation_stats: 截断统计字典（可选）
         :return: 转换后的数据字典
         """
         # 定义每个表的布尔字段
@@ -93,6 +94,74 @@ class DatabaseMigrator:
                 if field in data and data[field] is not None:
                     # 将 0/1 转换为 False/True
                     data[field] = bool(data[field])
+
+        # 定义每个表的日期时间字段
+        datetime_fields = {
+            "users": ["created_at"],
+            "api_keys": ["created_at", "last_used_at"],
+            "credentials": ["created_at", "last_used_at", "last_used_flash", "last_used_pro", "last_used_30"],
+            "usage_logs": ["created_at"],
+            "system_config": ["updated_at"],
+        }
+
+        # 转换日期时间字段：SQLite 的字符串 -> PostgreSQL 的 datetime
+        if table_name in datetime_fields:
+            for field in datetime_fields[table_name]:
+                if field in data and data[field] is not None and isinstance(data[field], str):
+                    try:
+                        # 解析 ISO 格式的日期时间字符串
+                        data[field] = datetime.fromisoformat(data[field])
+                    except ValueError:
+                        # 如果解析失败，记录警告但继续处理
+                        logger.warning(f"无法解析日期时间字段 {field}: {data[field]}")
+                        data[field] = None
+
+        # 定义每个表的字符串字段长度限制
+        string_length_limits = {
+            "users": {
+                "username": 50,
+                "email": 100,
+                "hashed_password": 255,
+                "discord_id": 50,
+                "discord_name": 100,
+            },
+            "api_keys": {
+                "key": 64,
+                "name": 100,
+            },
+            "credentials": {
+                "name": 100,
+                "project_id": 200,
+                "credential_type": 20,
+                "model_tier": 10,
+                "account_type": 20,
+                "email": 100,
+            },
+            "usage_logs": {
+                "model": 100,
+                "endpoint": 200,
+                "client_ip": 50,
+                "user_agent": 500,
+                "error_type": 50,
+                "error_code": 100,
+                "credential_email": 100,
+            },
+            "system_config": {
+                "key": 100,
+            },
+        }
+
+        # 截断过长的字符串字段
+        if table_name in string_length_limits:
+            for field, max_length in string_length_limits[table_name].items():
+                if field in data and data[field] is not None and isinstance(data[field], str):
+                    if len(data[field]) > max_length:
+                        # 统计截断次数
+                        if truncation_stats is not None:
+                            if field not in truncation_stats:
+                                truncation_stats[field] = 0
+                            truncation_stats[field] += 1
+                        data[field] = data[field][:max_length]
 
         # 处理 UNIQUE 约束：NULL 值在 PostgreSQL 中也需要唯一性检查
         # SQLite 允许多个 NULL 值，但 PostgreSQL 默认也允许
@@ -124,92 +193,97 @@ class DatabaseMigrator:
 
         return data
 
-    async def migrate_table(self, table_name: str, batch_size: int = 5000):
+    async def migrate_table(self, table_name: str, batch_size: int = 10000):
         """
-        迁移单个表的数据（优化版：使用 COPY 命令和流式读取）
+        迁移单个表的数据
         :param table_name: 表名
         :param batch_size: 批量处理大小
         """
         logger.info(f"开始迁移表: {table_name}")
 
         try:
-            # 获取表结构
+            # 获取 SQLite 表的列名
             async with self.sqlite_engine.begin() as sqlite_conn:
                 result = await sqlite_conn.execute(text(f"SELECT * FROM {table_name} LIMIT 0"))
-                columns = list(result.keys())
+                sqlite_columns = list(result.keys())
 
-            # 流式读取数据并使用 COPY 命令插入
+            # 获取 PostgreSQL 表的列名和顺序
+            async with self.postgres_engine.begin() as pg_conn:
+                result = await pg_conn.execute(text(f"SELECT * FROM {table_name} LIMIT 0"))
+                pg_columns = list(result.keys())
+
+            # 如果是 usage_logs 表，先获取所有有效的 credential_id
+            valid_credential_ids = set()
+            if table_name == "usage_logs":
+                async with self.postgres_engine.begin() as pg_conn:
+                    result = await pg_conn.execute(text("SELECT id FROM credentials"))
+                    valid_credential_ids = {row[0] for row in result.fetchall()}
+                    logger.info(f"  找到 {len(valid_credential_ids)} 个有效的 credential_id")
+
+            # 构建插入语句（在循环外构建一次）
+            columns_str = ", ".join(pg_columns)
+            placeholders = ", ".join([f":{col}" for col in pg_columns])
+            insert_sql = f"INSERT INTO {table_name} ({columns_str}) VALUES ({placeholders})"
+
+            # 对于 credentials 表，使用 ON CONFLICT DO NOTHING 避免唯一约束冲突
+            if table_name == "credentials":
+                insert_sql += " ON CONFLICT (id) DO NOTHING"
+
+            # 使用批量插入
             async with self.sqlite_engine.connect() as sqlite_conn:
                 # 使用流式游标
                 result = await sqlite_conn.stream(text(f"SELECT * FROM {table_name}"))
 
                 total_rows = 0
-                buffer = io.StringIO()
+                skipped_invalid_fk = 0
+                truncation_stats = {}  # 统计截断次数
 
-                # 获取原始连接
-                raw_conn = await self.postgres_engine.raw_connection()
-                try:
-                    # 获取底层连接对象
-                    pg_conn = raw_conn.driver_connection
+                # 使用单个事务处理多个批次，减少事务开销
+                async with self.postgres_engine.begin() as pg_conn:
+                    # 流式处理数据
+                    async for partition in result.partitions(batch_size):
+                        batch_data = []
+                        batch_invalid_fk = 0
+                        for row in partition:
+                            # 转换数据类型（使用 SQLite 的列顺序读取）
+                            row_dict = dict(zip(sqlite_columns, row))
+                            converted = self.convert_sqlite_to_postgres_types(table_name, row_dict, truncation_stats)
 
-                    # 使用 COPY 命令（最快的批量插入方式）
-                    columns_str = ", ".join(columns)
-                    copy_sql = f"COPY {table_name} ({columns_str}) FROM STDIN WITH (FORMAT CSV, NULL '\\N')"
+                            # 处理 usage_logs 的外键约束
+                            if table_name == "usage_logs" and converted.get("credential_id") is not None:
+                                if converted["credential_id"] not in valid_credential_ids:
+                                    # 将无效的 credential_id 设置为 NULL
+                                    converted["credential_id"] = None
+                                    batch_invalid_fk += 1
+                                    skipped_invalid_fk += 1
 
-                    async with pg_conn.cursor() as cursor:
-                        # 开始 COPY 操作
-                        await cursor.copy(copy_sql)
+                            # 重新排序数据以匹配 PostgreSQL 的列顺序
+                            reordered = {col: converted.get(col) for col in pg_columns}
+                            batch_data.append(reordered)
+                            total_rows += 1
 
-                        # 流式处理数据
-                        batch_count = 0
-                        async for partition in result.partitions(batch_size):
-                            for row in partition:
-                                # 转换数据类型
-                                row_dict = dict(zip(columns, row))
-                                converted = self.convert_sqlite_to_postgres_types(table_name, row_dict)
+                        # 批量插入到 PostgreSQL（复用已有的事务）
+                        if batch_data:
+                            await pg_conn.execute(text(insert_sql), batch_data)
 
-                                # 构建 CSV 行
-                                csv_row = []
-                                for col in columns:
-                                    value = converted.get(col)
-                                    if value is None:
-                                        csv_row.append('\\N')
-                                    elif isinstance(value, bool):
-                                        csv_row.append('t' if value else 'f')
-                                    elif isinstance(value, str):
-                                        # 转义特殊字符
-                                        escaped = value.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r').replace(',', '\\,')
-                                        csv_row.append(escaped)
-                                    else:
-                                        csv_row.append(str(value))
-
-                                buffer.write(','.join(csv_row) + '\n')
-                                total_rows += 1
-
-                            # 批量写入
-                            if buffer.tell() > 0:
-                                buffer.seek(0)
-                                await cursor.write(buffer.read().encode('utf-8'))
-                                buffer.seek(0)
-                                buffer.truncate(0)
-                                batch_count += 1
+                            # 显示进度，包括本批次修复的外键数量
+                            if batch_invalid_fk > 0:
+                                logger.info(f"  已处理 {total_rows} 条记录 (本批次修复 {batch_invalid_fk} 条无效外键)")
+                            else:
                                 logger.info(f"  已处理 {total_rows} 条记录")
-
-                        # 结束 COPY 操作
-                        await cursor.write(b'')
-
-                    await pg_conn.commit()
-                finally:
-                    await raw_conn.close()
 
                 if total_rows == 0:
                     logger.info(f"  ✓ {table_name}: 无数据，跳过")
                     return
 
                 logger.info(f"  ✓ 共迁移 {total_rows} 条记录")
+                if skipped_invalid_fk > 0:
+                    logger.info(f"  ⚠ 修复了 {skipped_invalid_fk} 条无效外键引用")
+                if truncation_stats:
+                    logger.info(f"  ⚠ 字段截断统计: {', '.join([f'{k}({v}条)' for k, v in truncation_stats.items()])}")
 
             # 重置自增序列（PostgreSQL 特有）
-            if "id" in columns:
+            if "id" in pg_columns:
                 async with self.postgres_engine.begin() as pg_conn:
                     try:
                         # 获取当前最大 ID
