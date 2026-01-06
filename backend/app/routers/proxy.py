@@ -89,25 +89,21 @@ async def get_user_from_api_key(request: Request, db: AsyncSession = Depends(get
     
     # 检查用户凭证情况
     from app.models.user import Credential
+    from sqlalchemy import case
     
-    # 统计用户的 2.5 和 3.0 凭证数量
-    cred_25_result = await db.execute(
-        select(func.count(Credential.id))
+    # 合并凭证统计查询（2.5和3.0一次性查询）
+    cred_stats_result = await db.execute(
+        select(
+            func.count(Credential.id).label("total"),
+            func.sum(case((Credential.model_tier == "3", 1), else_=0)).label("tier_30")
+        )
         .where(Credential.user_id == user.id)
         .where(Credential.is_active == True)
-        .where(Credential.model_tier != "3")
     )
-    cred_25_count = cred_25_result.scalar() or 0
-    
-    cred_30_result = await db.execute(
-        select(func.count(Credential.id))
-        .where(Credential.user_id == user.id)
-        .where(Credential.is_active == True)
-        .where(Credential.model_tier == "3")
-    )
-    cred_30_count = cred_30_result.scalar() or 0
-    
-    total_cred_count = cred_25_count + cred_30_count
+    cred_stats = cred_stats_result.one()
+    total_cred_count = cred_stats.total or 0
+    cred_30_count = cred_stats.tier_30 or 0
+    cred_25_count = total_cred_count - cred_30_count
     has_credential = total_cred_count > 0
 
     # 计算用户各类模型的配额上限
@@ -159,30 +155,29 @@ async def get_user_from_api_key(request: Request, db: AsyncSession = Depends(get
         model_filter = and_(UsageLog.model.notlike('%pro%'), UsageLog.model.notlike('%3%'))
         quota_name = "Flash模型"
 
-    # 检查该类别模型的使用量
-    if quota_limit > 0:
-        model_usage_result = await db.execute(
-            select(func.count(UsageLog.id)).where(
-                UsageLog.user_id == user.id,
-                UsageLog.created_at >= start_of_day,
-                model_filter
+    # 合并使用量查询（模型类别和总量一次性查询）
+    if quota_limit > 0 or has_credential:
+        usage_stats_result = await db.execute(
+            select(
+                func.sum(case((model_filter, 1), else_=0)).label("model_usage"),
+                func.count(UsageLog.id).label("total_usage")
             )
+            .where(UsageLog.user_id == user.id)
+            .where(UsageLog.created_at >= start_of_day)
         )
-        current_usage = model_usage_result.scalar() or 0
-        if current_usage >= quota_limit:
+        usage_stats = usage_stats_result.one()
+        current_usage = usage_stats.model_usage or 0
+        total_usage = usage_stats.total_usage or 0
+        
+        # 检查该类别模型的使用量
+        if quota_limit > 0 and current_usage >= quota_limit:
             raise HTTPException(
                 status_code=429, 
                 detail=f"已达到{quota_name}每日配额限制 ({current_usage}/{quota_limit})"
             )
-    
-    # 同时检查总配额
-    if has_credential:
-        total_usage_result = await db.execute(
-            select(func.count(UsageLog.id))
-            .where(UsageLog.user_id == user.id)
-            .where(UsageLog.created_at >= start_of_day)
-        )
-        if (total_usage_result.scalar() or 0) >= user.daily_quota:
+        
+        # 检查总配额
+        if has_credential and total_usage >= user.daily_quota:
             raise HTTPException(status_code=429, detail="已达到今日总配额限制")
     
     return user
@@ -326,267 +321,303 @@ async def chat_completions(
     db.add(placeholder_log)
     await db.commit()
     await db.refresh(placeholder_log)  # 获取插入后的 ID
+    placeholder_log_id = placeholder_log.id  # 保存ID，后续通过独立会话访问
     
+    # 获取首个凭证后立即释放主连接（流式响应将使用独立会话）
     # 重试逻辑：报错时切换凭证重试
     max_retries = settings.error_retry_count
     last_error = None
     tried_credential_ids = set()
     
-    for retry_attempt in range(max_retries + 1):
-        # 获取凭证（大锅饭规则 + 模型等级匹配）
-        credential = await CredentialPool.get_available_credential(
-            db, 
-            user_id=user.id,
-            user_has_public_creds=user_has_public,
-            model=model,
-            exclude_ids=tried_credential_ids  # 排除已尝试过的凭证
-        )
-        if not credential:
-            if retry_attempt > 0:
-                # 已经重试过，所有凭证都失败了
-                raise HTTPException(status_code=503, detail=f"所有凭证都失败了（已重试 {retry_attempt} 次）: {last_error}")
-            required_tier = CredentialPool.get_required_tier(model)
-            if required_tier == "3":
-                raise HTTPException(
-                    status_code=503, 
-                    detail="没有可用的 Gemini 3 等级凭证。该模型需要有 Gemini 3 资格的凭证。"
-                )
-            if not user_has_public:
-                raise HTTPException(
-                    status_code=503, 
-                    detail="您没有可用凭证。请在凭证管理页面上传凭证，或捐赠凭证以使用公共池。"
-                )
-            raise HTTPException(status_code=503, detail="暂无可用凭证，请稍后重试")
+    # 预先获取第一个凭证和token（使用主db）
+    credential = await CredentialPool.get_available_credential(
+        db, 
+        user_id=user.id,
+        user_has_public_creds=user_has_public,
+        model=model,
+        exclude_ids=tried_credential_ids
+    )
+    if not credential:
+        required_tier = CredentialPool.get_required_tier(model)
+        if required_tier == "3":
+            raise HTTPException(
+                status_code=503, 
+                detail="没有可用的 Gemini 3 等级凭证。该模型需要有 Gemini 3 资格的凭证。"
+            )
+        if not user_has_public:
+            raise HTTPException(
+                status_code=503, 
+                detail="您没有可用凭证。请在凭证管理页面上传凭证，或捐赠凭证以使用公共池。"
+            )
+        raise HTTPException(status_code=503, detail="暂无可用凭证，请稍后重试")
+    
+    tried_credential_ids.add(credential.id)
+    
+    # 获取 access_token（自动刷新）
+    access_token = await CredentialPool.get_access_token(credential, db)
+    if not access_token:
+        await CredentialPool.mark_credential_error(db, credential.id, "Token 刷新失败")
+        raise HTTPException(status_code=503, detail="Token 刷新失败")
+    
+    # 获取 project_id
+    project_id = credential.project_id or ""
+    first_credential_id = credential.id
+    first_credential_email = credential.email
+    print(f"[Proxy] 使用凭证: {credential.email}, project_id: {project_id}, model: {model}", flush=True)
+    
+    if not project_id:
+        print(f"[Proxy] ⚠️ 凭证 {credential.email} 没有 project_id!", flush=True)
+    
+    client = GeminiClient(access_token, project_id)
+    use_fake_streaming = client.is_fake_streaming(model)
+    
+    # 主db连接到此处结束使用，流式生成器将使用独立会话
+    
+    # 非流式模式的处理函数（仍在主请求处理器内，可使用主db）
+    async def handle_non_stream():
+        """处理非流式请求（使用主db）"""
+        nonlocal credential, access_token, project_id, client, tried_credential_ids, last_error
         
-        tried_credential_ids.add(credential.id)
-        
-        # 获取 access_token（自动刷新）
-        access_token = await CredentialPool.get_access_token(credential, db)
-        if not access_token:
-            await CredentialPool.mark_credential_error(db, credential.id, "Token 刷新失败")
-            last_error = "Token 刷新失败"
-            print(f"[Proxy] ⚠️ 凭证 {credential.email} Token 刷新失败，尝试下一个凭证 ({retry_attempt + 1}/{max_retries + 1})", flush=True)
-            continue
-        
-        # 获取 project_id
-        project_id = credential.project_id or ""
-        print(f"[Proxy] 使用凭证: {credential.email}, project_id: {project_id}, model: {model} (尝试 {retry_attempt + 1}/{max_retries + 1})", flush=True)
-        
-        if not project_id:
-            print(f"[Proxy] ⚠️ 凭证 {credential.email} 没有 project_id!", flush=True)
-        
-        client = GeminiClient(access_token, project_id)
-        
-        # 记录使用日志（更新占位记录）
-        async def log_usage(status_code: int = 200, cred=credential, error_msg: str = None):
-            latency = (time.time() - start_time) * 1000
-            
-            # 错误分类
-            error_type = None
-            error_code = None
-            if status_code != 200 and error_msg:
-                error_type, error_code = classify_error_simple(status_code, error_msg)
-            
-            # 更新占位记录
-            placeholder_log.credential_id = cred.id
-            placeholder_log.status_code = status_code
-            placeholder_log.latency_ms = latency
-            placeholder_log.error_message = error_msg[:2000] if error_msg else None
-            placeholder_log.error_type = error_type
-            placeholder_log.error_code = error_code
-            placeholder_log.credential_email = cred.email if cred else None
-            placeholder_log.request_body = request_body_str if status_code != 200 else None
-            await db.commit()
-            
-            # 更新凭证使用次数
-            cred.total_requests = (cred.total_requests or 0) + 1
-            cred.last_used_at = datetime.utcnow()
-            await db.commit()
-            
-            # WebSocket 实时通知
-            await notify_log_update({
-                "username": user.username,
-                "model": model,
-                "status_code": status_code,
-                "error_type": error_type,
-                "latency_ms": round(latency, 0),
-                "created_at": datetime.utcnow().isoformat()
-            })
-            await notify_stats_update()
-        
-        # 检查是否使用假流式
-        use_fake_streaming = client.is_fake_streaming(model)
-        
-        async def save_log_background(log_data: dict):
-            """后台任务：更新占位日志记录"""
+        for retry_attempt in range(max_retries + 1):
             try:
-                async with async_session() as bg_db:
-                    latency = log_data.get("latency_ms", 0)
-                    status_code = log_data.get("status_code", 200)
-                    error_msg = log_data.get("error_message")
-                    
-                    # 错误分类
-                    error_type = None
-                    error_code = None
-                    if status_code != 200 and error_msg:
-                        error_type, error_code = classify_error_simple(status_code, error_msg)
-                    
-                    # 更新占位记录
-                    log_result = await bg_db.execute(
-                        select(UsageLog).where(UsageLog.id == placeholder_log.id)
-                    )
-                    log = log_result.scalar_one_or_none()
-                    if log:
-                        log.credential_id = log_data.get("cred_id")
-                        log.status_code = status_code
-                        log.latency_ms = latency
-                        log.error_message = error_msg[:2000] if error_msg else None
-                        log.error_type = error_type
-                        log.error_code = error_code
-                        log.credential_email = log_data.get("cred_email")
-                        log.request_body = request_body_str if status_code != 200 else None
-                    
-                    # 更新凭证使用次数
-                    cred_id = log_data.get("cred_id")
-                    if cred_id:
-                        from app.models.user import Credential
-                        cred_result = await bg_db.execute(
-                            select(Credential).where(Credential.id == cred_id)
-                        )
-                        cred = cred_result.scalar_one_or_none()
-                        if cred:
-                            cred.total_requests = (cred.total_requests or 0) + 1
-                            cred.last_used_at = datetime.utcnow()
-                    
-                    await bg_db.commit()
-                    
-                    # WebSocket 实时通知
-                    await notify_log_update({
-                        "username": user.username,
-                        "model": model,
-                        "status_code": status_code,
-                        "error_type": error_type,
-                        "latency_ms": round(latency, 0),
-                        "created_at": datetime.utcnow().isoformat()
-                    })
-                    await notify_stats_update()
-                    print(f"[Proxy] ✅ 后台日志已记录: user={user.username}, model={model}, status={status_code}", flush=True)
-            except Exception as log_err:
-                print(f"[Proxy] ❌ 后台日志记录失败: {log_err}", flush=True)
-        
-        try:
-            if stream:
-                # 流式模式：收集日志数据，稍后通过后台任务记录
-                
-                async def stream_generator_with_retry():
-                    nonlocal credential, access_token, project_id, client, tried_credential_ids, last_error
-                    
-                    for stream_retry in range(max_retries + 1):
-                        try:
-                            if use_fake_streaming:
-                                async for chunk in client.chat_completions_fake_stream(
-                                    model=model,
-                                    messages=messages,
-                                    **{k: v for k, v in body.items() if k not in ["model", "messages", "stream"]}
-                                ):
-                                    yield chunk
-                            else:
-                                async for chunk in client.chat_completions_stream(
-                                    model=model,
-                                    messages=messages,
-                                    **{k: v for k, v in body.items() if k not in ["model", "messages", "stream"]}
-                                ):
-                                    yield chunk
-                            # 成功：记录日志数据
-                            latency = (time.time() - start_time) * 1000
-                            background_tasks.add_task(save_log_background, {
-                                "status_code": 200,
-                                "cred_id": credential.id,
-                                "cred_email": credential.email,
-                                "latency_ms": latency
-                            })
-                            yield "data: [DONE]\n\n"
-                            return  # 成功，退出
-                        except Exception as e:
-                            error_str = str(e)
-                            # 标记凭证失败（不创建新会话，直接在主 db 中操作）
-                            try:
-                                await CredentialPool.handle_credential_failure(db, credential.id, error_str)
-                            except:
-                                pass  # 主会话可能已关闭，忽略错误
-                            last_error = error_str
-                            
-                            # 检查是否应该重试
-                            should_retry = any(code in error_str for code in ["404", "500", "503", "429", "RESOURCE_EXHAUSTED", "NOT_FOUND", "ECONNRESET", "socket hang up", "ConnectionReset", "Connection reset", "ETIMEDOUT", "ECONNREFUSED"])
-                            
-                            if should_retry and stream_retry < max_retries:
-                                print(f"[Proxy] ⚠️ 流式请求失败: {error_str}，切换凭证重试 ({stream_retry + 2}/{max_retries + 1})", flush=True)
-                                
-                                # 获取新凭证（复用主 db 会话）
-                                try:
-                                    new_credential = await CredentialPool.get_available_credential(
-                                        db, user_id=user.id, user_has_public_creds=user_has_public,
-                                        model=model, exclude_ids=tried_credential_ids
-                                    )
-                                    if new_credential:
-                                        tried_credential_ids.add(new_credential.id)
-                                        new_token = await CredentialPool.get_access_token(new_credential, db)
-                                        if new_token:
-                                            credential = new_credential
-                                            access_token = new_token
-                                            project_id = new_credential.project_id or ""
-                                            client = GeminiClient(access_token, project_id)
-                                            print(f"[Proxy] 🔄 切换到凭证: {credential.email}", flush=True)
-                                            continue
-                                except:
-                                    pass  # 主会话已关闭，无法获取新凭证
-                            
-                            # 无法重试，输出错误并记录日志
-                            status_code = extract_status_code(error_str)
-                            latency = (time.time() - start_time) * 1000
-                            background_tasks.add_task(save_log_background, {
-                                "status_code": status_code,
-                                "cred_id": credential.id,
-                                "cred_email": credential.email,
-                                "error_message": error_str,
-                                "latency_ms": latency
-                            })
-                            yield f"data: {json.dumps({'error': f'API Error (已重试 {stream_retry + 1} 次): {error_str}'})}\n\n"
-                            return
-                
-                return StreamingResponse(
-                    stream_generator_with_retry(),
-                    media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
-                )
-            else:
-                # 非流式模式
                 result = await client.chat_completions(
                     model=model,
                     messages=messages,
                     **{k: v for k, v in body.items() if k not in ["model", "messages", "stream"]}
                 )
-                await log_usage()
+                
+                # 成功：更新占位日志
+                latency = (time.time() - start_time) * 1000
+                error_type = None
+                error_code = None
+                
+                placeholder_log.credential_id = credential.id
+                placeholder_log.status_code = 200
+                placeholder_log.latency_ms = latency
+                placeholder_log.error_type = error_type
+                placeholder_log.error_code = error_code
+                placeholder_log.credential_email = credential.email
+                await db.commit()
+                
+                # 更新凭证使用次数
+                credential.total_requests = (credential.total_requests or 0) + 1
+                credential.last_used_at = datetime.utcnow()
+                await db.commit()
+                
+                # WebSocket 实时通知
+                await notify_log_update({
+                    "username": user.username,
+                    "model": model,
+                    "status_code": 200,
+                    "error_type": error_type,
+                    "latency_ms": round(latency, 0),
+                    "created_at": datetime.utcnow().isoformat()
+                })
+                await notify_stats_update()
+                
                 return JSONResponse(content=result)
+                
+            except Exception as e:
+                error_str = str(e)
+                await CredentialPool.handle_credential_failure(db, credential.id, error_str)
+                last_error = error_str
+                
+                # 检查是否应该重试
+                should_retry = any(code in error_str for code in ["404", "500", "503", "429", "RESOURCE_EXHAUSTED", "NOT_FOUND", "ECONNRESET", "socket hang up", "ConnectionReset", "Connection reset", "ETIMEDOUT", "ECONNREFUSED"])
+                
+                if should_retry and retry_attempt < max_retries:
+                    print(f"[Proxy] ⚠️ 请求失败: {error_str}，切换凭证重试 ({retry_attempt + 2}/{max_retries + 1})", flush=True)
+                    
+                    # 获取新凭证
+                    credential = await CredentialPool.get_available_credential(
+                        db, user_id=user.id, user_has_public_creds=user_has_public,
+                        model=model, exclude_ids=tried_credential_ids
+                    )
+                    if not credential:
+                        break
+                    
+                    tried_credential_ids.add(credential.id)
+                    access_token = await CredentialPool.get_access_token(credential, db)
+                    if not access_token:
+                        continue
+                    
+                    project_id = credential.project_id or ""
+                    client = GeminiClient(access_token, project_id)
+                    print(f"[Proxy] 🔄 切换到凭证: {credential.email}", flush=True)
+                    continue
+                
+                # 失败：更新占位日志
+                status_code = extract_status_code(error_str)
+                latency = (time.time() - start_time) * 1000
+                error_type, error_code = classify_error_simple(status_code, error_str)
+                
+                placeholder_log.credential_id = credential.id
+                placeholder_log.status_code = status_code
+                placeholder_log.latency_ms = latency
+                placeholder_log.error_message = error_str[:2000]
+                placeholder_log.error_type = error_type
+                placeholder_log.error_code = error_code
+                placeholder_log.credential_email = credential.email
+                placeholder_log.request_body = request_body_str
+                await db.commit()
+                
+                raise HTTPException(status_code=status_code, detail=f"API调用失败 (已重试 {retry_attempt + 1} 次): {error_str}")
         
-        except Exception as e:
-            error_str = str(e)
-            await CredentialPool.handle_credential_failure(db, credential.id, error_str)
-            last_error = error_str
-            
-            # 检查是否应该重试
-            should_retry = any(code in error_str for code in ["404", "500", "503", "429", "RESOURCE_EXHAUSTED", "NOT_FOUND", "ECONNRESET", "socket hang up", "ConnectionReset", "Connection reset", "ETIMEDOUT", "ECONNREFUSED"])
-            
-            if should_retry and retry_attempt < max_retries:
-                print(f"[Proxy] ⚠️ 请求失败: {error_str}，切换凭证重试 ({retry_attempt + 2}/{max_retries + 1})", flush=True)
-                continue
-            
-            status_code = extract_status_code(error_str)
-            await log_usage(status_code, error_msg=error_str)
-            raise HTTPException(status_code=status_code, detail=f"API调用失败 (已重试 {retry_attempt + 1} 次): {error_str}")
+        # 所有重试都失败
+        raise HTTPException(status_code=503, detail=f"所有凭证都失败了: {last_error}")
     
-    # 所有重试都失败
-    raise HTTPException(status_code=503, detail=f"所有凭证都失败了: {last_error}")
+    # 流式模式的处理
+    if not stream:
+        return await handle_non_stream()
+    
+    # 流式响应：使用独立会话，不持有主db连接
+    async def save_log_background(log_data: dict):
+        """后台任务：更新占位日志记录（使用独立会话）"""
+        try:
+            async with async_session() as bg_db:
+                latency = log_data.get("latency_ms", 0)
+                status_code = log_data.get("status_code", 200)
+                error_msg = log_data.get("error_message")
+                
+                # 错误分类
+                error_type = None
+                error_code = None
+                if status_code != 200 and error_msg:
+                    error_type, error_code = classify_error_simple(status_code, error_msg)
+                
+                # 更新占位记录
+                log_result = await bg_db.execute(
+                    select(UsageLog).where(UsageLog.id == placeholder_log_id)
+                )
+                log = log_result.scalar_one_or_none()
+                if log:
+                    log.credential_id = log_data.get("cred_id")
+                    log.status_code = status_code
+                    log.latency_ms = latency
+                    log.error_message = error_msg[:2000] if error_msg else None
+                    log.error_type = error_type
+                    log.error_code = error_code
+                    log.credential_email = log_data.get("cred_email")
+                    log.request_body = request_body_str if status_code != 200 else None
+                
+                # 更新凭证使用次数
+                cred_id = log_data.get("cred_id")
+                if cred_id:
+                    from app.models.user import Credential
+                    cred_result = await bg_db.execute(
+                        select(Credential).where(Credential.id == cred_id)
+                    )
+                    cred = cred_result.scalar_one_or_none()
+                    if cred:
+                        cred.total_requests = (cred.total_requests or 0) + 1
+                        cred.last_used_at = datetime.utcnow()
+                
+                await bg_db.commit()
+                
+                # WebSocket 实时通知
+                await notify_log_update({
+                    "username": user.username,
+                    "model": model,
+                    "status_code": status_code,
+                    "error_type": error_type,
+                    "latency_ms": round(latency, 0),
+                    "created_at": datetime.utcnow().isoformat()
+                })
+                await notify_stats_update()
+                print(f"[Proxy] ✅ 后台日志已记录: user={user.username}, model={model}, status={status_code}", flush=True)
+        except Exception as log_err:
+            print(f"[Proxy] ❌ 后台日志记录失败: {log_err}", flush=True)
+    
+    async def stream_generator_with_retry():
+        """流式生成器（使用独立会话进行数据库操作）"""
+        nonlocal access_token, project_id, client, tried_credential_ids, last_error
+        current_cred_id = first_credential_id
+        current_cred_email = first_credential_email
+        
+        for stream_retry in range(max_retries + 1):
+            try:
+                if use_fake_streaming:
+                    async for chunk in client.chat_completions_fake_stream(
+                        model=model,
+                        messages=messages,
+                        **{k: v for k, v in body.items() if k not in ["model", "messages", "stream"]}
+                    ):
+                        yield chunk
+                else:
+                    async for chunk in client.chat_completions_stream(
+                        model=model,
+                        messages=messages,
+                        **{k: v for k, v in body.items() if k not in ["model", "messages", "stream"]}
+                    ):
+                        yield chunk
+                
+                # 成功：记录日志数据
+                latency = (time.time() - start_time) * 1000
+                background_tasks.add_task(save_log_background, {
+                    "status_code": 200,
+                    "cred_id": current_cred_id,
+                    "cred_email": current_cred_email,
+                    "latency_ms": latency
+                })
+                yield "data: [DONE]\n\n"
+                return  # 成功，退出
+                
+            except Exception as e:
+                error_str = str(e)
+                last_error = error_str
+                
+                # 使用独立会话处理凭证失败
+                try:
+                    async with async_session() as stream_db:
+                        await CredentialPool.handle_credential_failure(stream_db, current_cred_id, error_str)
+                except Exception as db_err:
+                    print(f"[Proxy] ⚠️ 标记凭证失败时出错: {db_err}", flush=True)
+                
+                # 检查是否应该重试
+                should_retry = any(code in error_str for code in ["404", "500", "503", "429", "RESOURCE_EXHAUSTED", "NOT_FOUND", "ECONNRESET", "socket hang up", "ConnectionReset", "Connection reset", "ETIMEDOUT", "ECONNREFUSED"])
+                
+                if should_retry and stream_retry < max_retries:
+                    print(f"[Proxy] ⚠️ 流式请求失败: {error_str}，切换凭证重试 ({stream_retry + 2}/{max_retries + 1})", flush=True)
+                    
+                    # 🚀 使用独立会话获取新凭证
+                    try:
+                        async with async_session() as stream_db:
+                            new_credential = await CredentialPool.get_available_credential(
+                                stream_db, user_id=user.id, user_has_public_creds=user_has_public,
+                                model=model, exclude_ids=tried_credential_ids
+                            )
+                            if new_credential:
+                                tried_credential_ids.add(new_credential.id)
+                                new_token = await CredentialPool.get_access_token(new_credential, stream_db)
+                                if new_token:
+                                    current_cred_id = new_credential.id
+                                    current_cred_email = new_credential.email
+                                    access_token = new_token
+                                    project_id = new_credential.project_id or ""
+                                    client = GeminiClient(access_token, project_id)
+                                    print(f"[Proxy] 🔄 切换到凭证: {current_cred_email}", flush=True)
+                                    continue
+                    except Exception as retry_err:
+                        print(f"[Proxy] ⚠️ 获取新凭证失败: {retry_err}", flush=True)
+                
+                # 无法重试，输出错误并记录日志
+                status_code = extract_status_code(error_str)
+                latency = (time.time() - start_time) * 1000
+                background_tasks.add_task(save_log_background, {
+                    "status_code": status_code,
+                    "cred_id": current_cred_id,
+                    "cred_email": current_cred_email,
+                    "error_message": error_str,
+                    "latency_ms": latency
+                })
+                yield f"data: {json.dumps({'error': f'API Error (已重试 {stream_retry + 1} 次): {error_str}'})}\n\n"
+                return
+    
+    return StreamingResponse(
+        stream_generator_with_retry(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    )
 
 
 # ===== Gemini 原生接口支持 =====
@@ -839,9 +870,15 @@ async def gemini_stream_generate_content(
         raise HTTPException(status_code=503, detail="凭证已失效")
     
     project_id = credential.project_id or ""
+    credential_id = credential.id
+    credential_email = credential.email
+    user_id = user.id
+    username = user.username
     print(f"[Gemini Stream] 使用凭证: {credential.email}, project_id: {project_id}, model: {model}", flush=True)
     
-    # 后台任务：记录日志（避免占用数据库连接）
+    # ✅ 主db连接到此处结束使用，流式生成器将使用独立会话（后台任务）
+    
+    # 后台任务：记录日志（使用独立会话）
     async def save_log_background(log_data: dict):
         try:
             async with async_session() as bg_db:
@@ -856,8 +893,8 @@ async def gemini_stream_generate_content(
                     error_type, error_code = classify_error_simple(status_code, error_msg)
                 
                 log = UsageLog(
-                    user_id=user.id,
-                    credential_id=credential.id,
+                    user_id=user_id,
+                    credential_id=credential_id,
                     model=model,
                     endpoint="/v1beta/streamGenerateContent",
                     status_code=status_code,
@@ -866,14 +903,14 @@ async def gemini_stream_generate_content(
                     error_message=error_msg[:2000] if error_msg else None,
                     error_type=error_type,
                     error_code=error_code,
-                    credential_email=credential.email if credential else None
+                    credential_email=credential_email
                 )
                 bg_db.add(log)
                 
                 # 更新凭证使用次数
                 from app.models.user import Credential
                 cred_result = await bg_db.execute(
-                    select(Credential).where(Credential.id == credential.id)
+                    select(Credential).where(Credential.id == credential_id)
                 )
                 cred = cred_result.scalar_one_or_none()
                 if cred:
@@ -884,7 +921,7 @@ async def gemini_stream_generate_content(
                 
                 # WebSocket 实时通知
                 await notify_log_update({
-                    "username": user.username,
+                    "username": username,
                     "model": model,
                     "status_code": status_code,
                     "error_type": error_type,
@@ -892,7 +929,7 @@ async def gemini_stream_generate_content(
                     "created_at": datetime.utcnow().isoformat()
                 })
                 await notify_stats_update()
-                print(f"[Gemini Stream] ✅ 后台日志已记录: user={user.username}, model={model}, status={status_code}", flush=True)
+                print(f"[Gemini Stream] ✅ 后台日志已记录: user={username}, model={model}, status={status_code}", flush=True)
         except Exception as log_err:
             print(f"[Gemini Stream] ❌ 后台日志记录失败: {log_err}", flush=True)
     
@@ -920,6 +957,7 @@ async def gemini_stream_generate_content(
     payload = {"model": model, "project": project_id, "request": request_body}
     
     async def stream_generator():
+        """🚀 流式生成器（不持有主db连接，使用独立会话处理数据库操作）"""
         nonlocal background_tasks
         cd_seconds = None
         try:
@@ -933,18 +971,20 @@ async def gemini_stream_generate_content(
                         error = await response.aread()
                         error_text = error.decode()[:500]
                         print(f"[Gemini Stream] ❌ 错误 {response.status_code}: {error_text}", flush=True)
-                        # 处理凭证失败（复用主 db）
+                        
+                        # 使用独立会话处理凭证失败
                         try:
-                            # 401/403 错误自动禁用凭证
-                            if response.status_code in [401, 403]:
-                                await CredentialPool.handle_credential_failure(db, credential.id, f"API Error {response.status_code}: {error_text}")
-                            # 429 错误解析 Google 返回的 CD 时间
-                            elif response.status_code == 429:
-                                cd_seconds = await CredentialPool.handle_429_rate_limit(
-                                    db, credential.id, model, error_text, dict(response.headers)
-                                )
-                        except:
-                            pass  # 主会话可能已关闭
+                            async with async_session() as stream_db:
+                                # 401/403 错误自动禁用凭证
+                                if response.status_code in [401, 403]:
+                                    await CredentialPool.handle_credential_failure(stream_db, credential_id, f"API Error {response.status_code}: {error_text}")
+                                # 429 错误解析 Google 返回的 CD 时间
+                                elif response.status_code == 429:
+                                    cd_seconds = await CredentialPool.handle_429_rate_limit(
+                                        stream_db, credential_id, model, error_text, dict(response.headers)
+                                    )
+                        except Exception as db_err:
+                            print(f"[Gemini Stream] ⚠️ 处理凭证失败时出错: {db_err}", flush=True)
                         
                         # 后台记录日志
                         latency = (time.time() - start_time) * 1000
@@ -984,11 +1024,13 @@ async def gemini_stream_generate_content(
             })
         except Exception as e:
             error_str = str(e)
-            # 处理凭证失败（复用主 db）
+            
+            # 使用独立会话处理凭证失败
             try:
-                await CredentialPool.handle_credential_failure(db, credential.id, error_str)
-            except:
-                pass  # 主会话可能已关闭
+                async with async_session() as stream_db:
+                    await CredentialPool.handle_credential_failure(stream_db, credential_id, error_str)
+            except Exception as db_err:
+                print(f"[Gemini Stream] ⚠️ 标记凭证失败时出错: {db_err}", flush=True)
             
             # 后台记录日志
             status_code = extract_status_code(error_str)
