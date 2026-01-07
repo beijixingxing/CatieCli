@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     # 锁定捐赠：不允许取消捐赠（除非凭证失效）
     lock_donate: bool = False
     
+    # 日志保留
+    log_retention_days: int = 7  # 日志保留天数（0=永久保留）
+    
     # 公告
     announcement_enabled: bool = False
     announcement_title: str = ""
@@ -146,6 +149,7 @@ PERSISTENT_CONFIG_KEYS = [
     "cd_flash",
     "cd_pro",
     "cd_30",
+    "log_retention_days",
     "announcement_enabled",
     "announcement_title",
     "announcement_content",

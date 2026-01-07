@@ -17,6 +17,11 @@ from sqlalchemy import select
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+    from datetime import datetime, timedelta
+    from sqlalchemy import delete
+    from app.models.user import UsageLog
+    
     # 启动时初始化
     await init_db()
     
@@ -57,7 +62,39 @@ async def lifespan(app: FastAPI):
         
         await db.commit()
     
+    # 定时清理过期日志的后台任务
+    async def cleanup_old_logs():
+        while True:
+            try:
+                retention_days = settings.log_retention_days
+                if retention_days > 0:
+                    cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
+                    async with async_session() as db:
+                        result = await db.execute(
+                            delete(UsageLog).where(UsageLog.created_at < cutoff_date)
+                        )
+                        deleted_count = result.rowcount
+                        await db.commit()
+                        if deleted_count > 0:
+                            print(f"🗑️ 自动清理了 {deleted_count} 条过期日志（{retention_days}天前）")
+            except Exception as e:
+                print(f"⚠️ 日志清理失败: {e}")
+            
+            # 每24小时执行一次
+            await asyncio.sleep(86400)
+    
+    # 启动后台清理任务
+    cleanup_task = asyncio.create_task(cleanup_old_logs())
+    print("✅ 已启动日志自动清理任务")
+    
     yield
+    
+    # 关闭时取消后台任务
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(

@@ -1096,64 +1096,93 @@ export default function Admin() {
                   ) : (
                     <>
                       <div className="space-y-3">
-                        {Object.entries(errorStats.by_code).map(([code, count]) => (
-                          <div key={code}>
-                            <button
-                              onClick={() => setExpandedErrors(prev => ({ ...prev, [code]: !prev[code] }))}
-                              className={`w-full px-4 py-3 rounded-lg flex items-center justify-between cursor-pointer transition-colors ${
-                                code === '429' ? 'bg-orange-500/20 border border-orange-500/50 hover:bg-orange-500/30' :
-                                code === '401' || code === '403' ? 'bg-red-500/20 border border-red-500/50 hover:bg-red-500/30' :
-                                code === '500' ? 'bg-purple-500/20 border border-purple-500/50 hover:bg-purple-500/30' :
-                                'bg-gray-500/20 border border-gray-500/50 hover:bg-gray-500/30'
-                              }`}
-                            >
-                              <div className="flex items-center gap-3">
-                                <div className={`text-2xl font-bold ${
-                                  code === '429' ? 'text-orange-400' :
-                                  code === '401' || code === '403' ? 'text-red-400' :
-                                  code === '500' ? 'text-purple-400' :
-                                  'text-gray-400'
-                                }`}>{count}</div>
-                                <div className="text-sm text-gray-400">
-                                  {code === '429' ? '限速 (429)' :
-                                   code === '401' ? '未认证 (401)' :
-                                   code === '403' ? '禁止访问 (403)' :
-                                   code === '500' ? '服务器错误 (500)' :
-                                   `错误 (${code})`}
+                        {Object.entries(errorStats.by_code).map(([code, data]) => {
+                          // 兼容新旧数据格式：新格式 { count, details }，旧格式直接是 count
+                          const count = typeof data === 'object' ? data.count : data
+                          const details = typeof data === 'object' ? data.details : []
+                          
+                          return (
+                            <div key={code}>
+                              <button
+                                onClick={() => setExpandedErrors(prev => ({ ...prev, [code]: !prev[code] }))}
+                                className={`w-full px-4 py-3 rounded-lg flex items-center justify-between cursor-pointer transition-colors ${
+                                  code === '429' ? 'bg-orange-500/20 border border-orange-500/50 hover:bg-orange-500/30' :
+                                  code === '401' || code === '403' ? 'bg-red-500/20 border border-red-500/50 hover:bg-red-500/30' :
+                                  code === '500' ? 'bg-purple-500/20 border border-purple-500/50 hover:bg-purple-500/30' :
+                                  code === '400' ? 'bg-blue-500/20 border border-blue-500/50 hover:bg-blue-500/30' :
+                                  code === '404' ? 'bg-yellow-500/20 border border-yellow-500/50 hover:bg-yellow-500/30' :
+                                  'bg-gray-500/20 border border-gray-500/50 hover:bg-gray-500/30'
+                                }`}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className={`text-2xl font-bold ${
+                                    code === '429' ? 'text-orange-400' :
+                                    code === '401' || code === '403' ? 'text-red-400' :
+                                    code === '500' ? 'text-purple-400' :
+                                    code === '400' ? 'text-blue-400' :
+                                    code === '404' ? 'text-yellow-400' :
+                                    'text-gray-400'
+                                  }`}>{count}</div>
+                                  <div className="text-sm text-gray-400">
+                                    {code === '429' ? '限速 (429)' :
+                                     code === '401' ? '未认证 (401)' :
+                                     code === '403' ? '禁止访问 (403)' :
+                                     code === '500' ? '服务器错误 (500)' :
+                                     code === '400' ? '错误 (400)' :
+                                     code === '404' ? '错误 (404)' :
+                                     `错误 (${code})`}
+                                  </div>
                                 </div>
-                              </div>
-                              {expandedErrors[code] ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-                            </button>
-                            
-                            {expandedErrors[code] && (
-                              <div className="mt-2 ml-4 border-l-2 border-dark-600 pl-4 space-y-2">
-                                {errorStats.recent
-                                  .filter(err => String(err.status_code) === code)
-                                  .slice(0, 10)
-                                  .map(err => (
-                                    <div key={err.id} className="text-sm flex items-center justify-between py-1">
-                                      <span className="text-gray-400">
-                                        <span className="text-white">{err.username}</span>
-                                        <span className="mx-2">·</span>
-                                        <span className="font-mono">{err.model}</span>
-                                        {err.cd_seconds && <span className="ml-2 text-orange-400">CD:{err.cd_seconds}s</span>}
-                                      </span>
-                                      <span className="text-gray-500 text-xs">
-                                        {new Date(err.created_at).toLocaleTimeString()}
-                                      </span>
-                                    </div>
-                                  ))}
-                                {errorStats.recent.filter(err => String(err.status_code) === code).length === 0 && (
-                                  <div className="text-gray-500 text-sm py-2">暂无详细记录</div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        ))}
+                                {expandedErrors[code] ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                              </button>
+                              
+                              {expandedErrors[code] && (
+                                <div className="mt-2 ml-4 border-l-2 border-dark-600 pl-4 space-y-2">
+                                  {details.length > 0 ? (
+                                    details.map(err => (
+                                      <div key={err.id} className="text-sm flex items-center justify-between py-1">
+                                        <span className="text-gray-400">
+                                          <span className="text-white">{err.username}</span>
+                                          <span className="mx-2">·</span>
+                                          <span className="font-mono">{err.model}</span>
+                                          {err.cd_seconds && <span className="ml-2 text-orange-400">CD:{err.cd_seconds}s</span>}
+                                        </span>
+                                        <span className="text-gray-500 text-xs">
+                                          {new Date(err.created_at).toLocaleTimeString()}
+                                        </span>
+                                      </div>
+                                    ))
+                                  ) : (
+                                    // 兼容旧格式：从 recent 列表筛选
+                                    errorStats.recent
+                                      ?.filter(err => String(err.status_code) === code)
+                                      .slice(0, 10)
+                                      .map(err => (
+                                        <div key={err.id} className="text-sm flex items-center justify-between py-1">
+                                          <span className="text-gray-400">
+                                            <span className="text-white">{err.username}</span>
+                                            <span className="mx-2">·</span>
+                                            <span className="font-mono">{err.model}</span>
+                                            {err.cd_seconds && <span className="ml-2 text-orange-400">CD:{err.cd_seconds}s</span>}
+                                          </span>
+                                          <span className="text-gray-500 text-xs">
+                                            {new Date(err.created_at).toLocaleTimeString()}
+                                          </span>
+                                        </div>
+                                      ))
+                                  )}
+                                  {details.length === 0 && (!errorStats.recent || errorStats.recent.filter(err => String(err.status_code) === code).length === 0) && (
+                                    <div className="text-gray-500 text-sm py-2">暂无详细记录</div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
                       </div>
                       
                       <div className="text-sm text-gray-500 mt-4">
-                        总计：{Object.values(errorStats.by_code).reduce((a, b) => a + b, 0)} 次报错（点击展开详情）
+                        总计：{Object.values(errorStats.by_code).reduce((a, b) => a + (typeof b === 'object' ? b.count : b), 0)} 次报错（点击展开详情）
                       </div>
                     </>
                   )}
@@ -1220,6 +1249,42 @@ export default function Admin() {
             {/* 配额设置 */}
             {tab === 'settings' && (
               <div className="space-y-6">
+                {/* 日志保留设置 */}
+                <div className="card">
+                  <h3 className="font-semibold mb-4">📜 日志保留设置</h3>
+                  <p className="text-gray-400 text-sm mb-4">
+                    设置日志保留天数，超过设定天数的日志将被自动清理（0=永久保留）
+                  </p>
+                  <div className="flex gap-3 items-center">
+                    <input
+                      type="number"
+                      defaultValue={7}
+                      min={0}
+                      max={365}
+                      id="log-retention-input"
+                      className="w-32 px-4 py-2 bg-dark-800 border border-dark-600 rounded-lg text-white placeholder-gray-500"
+                    />
+                    <span className="text-gray-400">天</span>
+                    <button 
+                      onClick={async () => {
+                        const input = document.getElementById('log-retention-input')
+                        const days = parseInt(input.value) || 0
+                        try {
+                          const formData = new FormData()
+                          formData.append('log_retention_days', days)
+                          await api.post('/api/manage/config', formData)
+                          showAlert('成功', `日志保留时长已设为 ${days} 天${days === 0 ? '（永久保留）' : ''}`, 'success')
+                        } catch (err) {
+                          showAlert('保存失败', err.response?.data?.detail || err.message, 'error')
+                        }
+                      }}
+                      className="btn bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      保存设置
+                    </button>
+                  </div>
+                </div>
+
                 {/* 批量设置配额 */}
                 <div className="card">
                   <h3 className="font-semibold mb-4">批量设置所有用户配额</h3>
@@ -1313,9 +1378,23 @@ export default function Admin() {
                     <div><span className="text-gray-500">上传者:</span> {credDetailModal.data.username || '系统'}</div>
                     <div><span className="text-gray-500">邮箱:</span> {credDetailModal.data.email || '-'}</div>
                     <div><span className="text-gray-500">类型:</span> {credDetailModal.data.credential_type}</div>
-                    <div><span className="text-gray-500">等级:</span> {credDetailModal.data.model_tier}</div>
-                    <div><span className="text-gray-500">账号:</span> {credDetailModal.data.account_type}</div>
-                    <div><span className="text-gray-500">状态:</span> {credDetailModal.data.is_active ? '活跃' : '禁用'}</div>
+                    <div>
+                      <span className="text-gray-500">等级:</span>{' '}
+                      {credDetailModal.data.model_tier === '3' ? (
+                        <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 rounded text-xs">🚀 3.0可用</span>
+                      ) : (
+                        <span className="px-2 py-0.5 bg-gray-600/50 text-gray-400 rounded text-xs">2.5</span>
+                      )}
+                    </div>
+                    <div>
+                      <span className="text-gray-500">账号:</span>{' '}
+                      {credDetailModal.data.account_type === 'pro' ? (
+                        <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded text-xs">⭐ Pro</span>
+                      ) : (
+                        <span className="text-gray-400">{credDetailModal.data.account_type || 'free'}</span>
+                      )}
+                    </div>
+                    <div><span className="text-gray-500">状态:</span> {credDetailModal.data.is_active ? <span className="text-green-400">活跃</span> : <span className="text-red-400">禁用</span>}</div>
                     <div><span className="text-gray-500">公共:</span> {credDetailModal.data.is_public ? '是' : '否'}</div>
                     <div><span className="text-gray-500">请求:</span> {credDetailModal.data.total_requests}</div>
                     <div><span className="text-gray-500">失败:</span> {credDetailModal.data.failed_requests}</div>

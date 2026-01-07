@@ -879,6 +879,7 @@ async def get_config(user: User = Depends(get_current_admin)):
         "credential_pool_mode": settings.credential_pool_mode,
         "force_donate": settings.force_donate,
         "lock_donate": settings.lock_donate,
+        "log_retention_days": settings.log_retention_days,
         "announcement_enabled": settings.announcement_enabled,
         "announcement_title": settings.announcement_title,
         "announcement_content": settings.announcement_content,
@@ -942,6 +943,7 @@ async def update_config(
     credential_pool_mode: Optional[str] = Form(None),
     force_donate: Optional[bool] = Form(None),
     lock_donate: Optional[bool] = Form(None),
+    log_retention_days: Optional[int] = Form(None),
     announcement_enabled: Optional[bool] = Form(None),
     announcement_title: Optional[str] = Form(None),
     announcement_content: Optional[str] = Form(None),
@@ -1055,6 +1057,12 @@ async def update_config(
         await save_config_to_db("lock_donate", lock_donate)
         updated["lock_donate"] = lock_donate
     
+    # 日志保留配置
+    if log_retention_days is not None:
+        settings.log_retention_days = log_retention_days
+        await save_config_to_db("log_retention_days", log_retention_days)
+        updated["log_retention_days"] = log_retention_days
+    
     # 公告配置
     if announcement_enabled is not None:
         settings.announcement_enabled = announcement_enabled
@@ -1157,9 +1165,37 @@ async def get_global_stats(
         .group_by(UsageLog.status_code)
         .order_by(func.count(UsageLog.id).desc())
     )
-    error_by_code = {str(row[0]): row[1] for row in error_stats_result.all()}
+    error_counts = {str(row[0]): row[1] for row in error_stats_result.all()}
     
-    # 最近的报错详情（最近10条非200的记录）
+    # 按错误码分组获取各自的最近10条记录
+    error_by_code = {}
+    for code_str, count in error_counts.items():
+        code = int(code_str)
+        details_result = await db.execute(
+            select(UsageLog, User.username)
+            .join(User, UsageLog.user_id == User.id)
+            .where(UsageLog.status_code == code)
+            .where(UsageLog.created_at >= start_of_day)
+            .order_by(UsageLog.created_at.desc())
+            .limit(10)
+        )
+        details = [
+            {
+                "id": log.UsageLog.id,
+                "username": log.username,
+                "model": log.UsageLog.model,
+                "status_code": log.UsageLog.status_code,
+                "cd_seconds": log.UsageLog.cd_seconds,
+                "created_at": log.UsageLog.created_at.isoformat() + "Z"
+            }
+            for log in details_result.all()
+        ]
+        error_by_code[code_str] = {
+            "count": count,
+            "details": details
+        }
+    
+    # 最近的报错详情（最近10条非200的记录，兼容旧版前端）
     recent_errors_result = await db.execute(
         select(UsageLog, User.username)
         .join(User, UsageLog.user_id == User.id)
