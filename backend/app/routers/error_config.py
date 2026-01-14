@@ -116,9 +116,9 @@ async def get_status(
         "INVALID_REQUEST": "400",
         "MODEL_ERROR": "404",
         "CONTENT_FILTER": "400",
-        "NETWORK_ERROR": "-",
+        "NETWORK_ERROR": "500",
         "UPSTREAM_ERROR": "500/502/503",
-        "TIMEOUT": "-",
+        "TIMEOUT": "500",
         "TOKEN_ERROR": "503",
         "UNKNOWN": "-",
     }
