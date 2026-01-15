@@ -413,6 +413,7 @@ export default function Admin() {
 
   // 使用日志：搜索、分页、筛选
   const [logSearch, setLogSearch] = useState('')
+  const [logModelSearch, setLogModelSearch] = useState('')  // 模型搜索
   const [logPage, setLogPage] = useState(1)
   const [logStatus, setLogStatus] = useState('all')  // all, success, error
   const [logStartDate, setLogStartDate] = useState('')
@@ -430,6 +431,7 @@ export default function Admin() {
       if (logStartDate) params.append('start_date', logStartDate)
       if (logEndDate) params.append('end_date', logEndDate)
       if (logSearch) params.append('username', logSearch)
+      if (logModelSearch) params.append('model', logModelSearch)
       if (logStatus !== 'all') params.append('status', logStatus)
       
       const res = await api.get(`/api/admin/logs?${params.toString()}`)
@@ -464,7 +466,7 @@ export default function Admin() {
     if (tab === 'logs') {
       fetchLogs()
     }
-  }, [tab, logPage, logStatus, logStartDate, logEndDate])
+  }, [tab, logPage, logStatus, logStartDate, logEndDate, logModelSearch])
 
   // 搜索防抖
   useEffect(() => {
@@ -951,6 +953,13 @@ export default function Admin() {
                     className="px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-white placeholder-gray-500 w-40"
                   />
                   <input
+                    type="text"
+                    placeholder="搜索模型..."
+                    value={logModelSearch}
+                    onChange={(e) => { setLogModelSearch(e.target.value); setLogPage(1) }}
+                    className="px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-white placeholder-gray-500 w-48"
+                  />
+                  <input
                     type="date"
                     value={logStartDate}
                     onChange={(e) => { setLogStartDate(e.target.value); setLogPage(1) }}
@@ -973,7 +982,7 @@ export default function Admin() {
                     <option value="error">报错</option>
                   </select>
                   <button
-                    onClick={() => { setLogStartDate(''); setLogEndDate(''); setLogSearch(''); setLogStatus('all'); setLogPage(1) }}
+                    onClick={() => { setLogStartDate(''); setLogEndDate(''); setLogSearch(''); setLogModelSearch(''); setLogStatus('all'); setLogPage(1) }}
                     className="px-3 py-2 bg-dark-700 hover:bg-dark-600 rounded-lg text-gray-400"
                   >
                     重置
@@ -1015,8 +1024,11 @@ export default function Admin() {
                           <td className="font-mono text-sm">{log.model}</td>
                           <td className="text-gray-400 text-sm">{log.endpoint || '-'}</td>
                           <td>
-                            <span className={log.status_code === 200 ? 'text-green-400' : 'text-red-400'}>
-                              {log.status_code}
+                            <span className={
+                              log.status_code === 200 ? 'text-green-400' : 
+                              log.status_code === 0 ? 'text-orange-400' : 'text-red-400'
+                            }>
+                              {log.status_code === 0 ? '连接中断' : log.status_code}
                             </span>
                             {log.cd_seconds && (
                               <span className="ml-1 text-xs px-1 bg-orange-500/20 text-orange-400 rounded">

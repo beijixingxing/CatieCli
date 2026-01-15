@@ -779,22 +779,41 @@ async def get_stats_overview(
 @router.get("/stats/by-model")
 async def get_stats_by_model(
     days: int = 7,
+    page: int = 1,
+    page_size: int = 10,
     user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    """按模型统计使用量"""
+    """按模型统计使用量（支持分页）"""
     since = datetime.utcnow() - timedelta(days=days)
     
-    result = await db.execute(
+    # 基础查询
+    base_query = (
         select(UsageLog.model, func.count(UsageLog.id).label("count"))
         .where(UsageLog.created_at >= since)
         .group_by(UsageLog.model)
         .order_by(func.count(UsageLog.id).desc())
     )
     
+    # 获取总数
+    total_result = await db.execute(
+        select(func.count(func.distinct(UsageLog.model)))
+        .where(UsageLog.created_at >= since)
+    )
+    total = total_result.scalar() or 0
+    total_pages = (total + page_size - 1) // page_size if page_size > 0 else 1
+    
+    # 分页查询
+    offset = (page - 1) * page_size
+    result = await db.execute(base_query.offset(offset).limit(page_size))
+    
     return {
         "period_days": days,
-        "models": [{"model": row[0] or "unknown", "count": row[1]} for row in result.all()]
+        "models": [{"model": row[0] or "unknown", "count": row[1]} for row in result.all()],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
     }
 
 

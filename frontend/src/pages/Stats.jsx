@@ -8,6 +8,9 @@ export default function Stats() {
   const [overview, setOverview] = useState(null)
   const [globalStats, setGlobalStats] = useState(null)
   const [byModel, setByModel] = useState([])
+  const [modelPage, setModelPage] = useState(1)
+  const [modelTotalPages, setModelTotalPages] = useState(1)
+  const [modelTotal, setModelTotal] = useState(0)
   const [byUser, setByUser] = useState([])
   const [daily, setDaily] = useState([])
   const [loading, setLoading] = useState(true)
@@ -24,7 +27,7 @@ export default function Stats() {
 
   useEffect(() => {
     fetchStats()
-  }, [days])
+  }, [days, modelPage])
 
   const fetchStats = async () => {
     setLoading(true)
@@ -32,7 +35,7 @@ export default function Stats() {
     const results = await Promise.allSettled([
       api.get('/api/manage/stats/overview'),
       api.get('/api/manage/stats/global'),
-      api.get(`/api/manage/stats/by-model?days=${days}`),
+      api.get(`/api/manage/stats/by-model?days=${days}&page=${modelPage}&page_size=10`),
       api.get(`/api/manage/stats/by-user?days=${days}`),
       api.get(`/api/manage/stats/daily?days=${days}`),
     ])
@@ -50,7 +53,12 @@ export default function Stats() {
     // 分别处理每个结果
     if (results[0].status === 'fulfilled') setOverview(results[0].value.data)
     if (results[1].status === 'fulfilled') setGlobalStats(results[1].value.data)
-    if (results[2].status === 'fulfilled') setByModel(results[2].value.data.models || [])
+    if (results[2].status === 'fulfilled') {
+      const data = results[2].value.data
+      setByModel(data.models || [])
+      setModelTotalPages(data.total_pages || 1)
+      setModelTotal(data.total || 0)
+    }
     if (results[3].status === 'fulfilled') setByUser(results[3].value.data.users || [])
     if (results[4].status === 'fulfilled') setDaily(results[4].value.data.daily || [])
     
@@ -288,7 +296,12 @@ export default function Stats() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* 按模型统计 */}
           <div className="bg-gray-800 rounded-xl p-6">
-            <h2 className="text-xl font-semibold mb-4">🤖 按模型统计</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">🤖 按模型统计</h2>
+              {modelTotal > 0 && (
+                <span className="text-sm text-gray-400">共 {modelTotal} 个模型</span>
+              )}
+            </div>
             <div className="space-y-3">
               {byModel.length === 0 ? (
                 <p className="text-gray-400">暂无数据</p>
@@ -311,6 +324,28 @@ export default function Stats() {
                 ))
               )}
             </div>
+            {/* 分页 */}
+            {modelTotalPages > 1 && (
+              <div className="flex items-center justify-center gap-2 mt-4 pt-4 border-t border-gray-700">
+                <button
+                  onClick={() => setModelPage(p => Math.max(1, p - 1))}
+                  disabled={modelPage <= 1}
+                  className="px-3 py-1 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                >
+                  上一页
+                </button>
+                <span className="text-gray-400 text-sm">
+                  {modelPage} / {modelTotalPages}
+                </span>
+                <button
+                  onClick={() => setModelPage(p => Math.min(modelTotalPages, p + 1))}
+                  disabled={modelPage >= modelTotalPages}
+                  className="px-3 py-1 bg-gray-700 rounded hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                >
+                  下一页
+                </button>
+              </div>
+            )}
           </div>
 
           {/* 按用户统计 */}
