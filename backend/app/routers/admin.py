@@ -11,6 +11,7 @@ from app.services.auth import get_current_admin, get_password_hash
 from app.services.credential_pool import CredentialPool
 from app.services.websocket import notify_user_update, notify_credential_update
 from app.services.error_classifier import ErrorType, ERROR_TYPE_NAMES, get_error_type_name
+from app.cache import cached, CACHE_KEYS
 
 router = APIRouter(prefix="/api/admin", tags=["管理后台"])
 
@@ -611,6 +612,7 @@ async def delete_duplicate_credentials(
 
 # ===== 统计 =====
 @router.get("/stats")
+@cached(CACHE_KEYS["stats"], ttl=30)
 async def get_stats(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
@@ -816,6 +818,7 @@ async def clear_logs(
 
 
 @router.get("/error-stats")
+@cached(CACHE_KEYS["stats"], ttl=60)  # 错误统计缓存1分钟
 async def get_error_stats(
     days: int = 7,
     admin: User = Depends(get_current_admin),

@@ -1,49 +1,93 @@
 """
-简单内存缓存，用于减少数据库查询
-不需要 Redis，适合中小型部署
+缓存系统，优先使用Redis，Redis不可用时回退到内存缓存
 """
 
 import time
 from typing import Any, Optional
 from functools import wraps
 
+# 导入Redis服务
+from app.services.redis_service import redis_service
+
 class SimpleCache:
-    """简单的内存缓存"""
+    """缓存系统，优先使用Redis，Redis不可用时回退到内存缓存"""
     
     def __init__(self):
-        self._cache = {}
-        self._expires = {}
+        # 内存缓存作为备选
+        self._memory_cache = {}
+        self._memory_expires = {}
     
     def get(self, key: str) -> Optional[Any]:
-        """获取缓存值"""
-        if key not in self._cache:
+        """获取缓存值，优先从Redis获取"""
+        # 1. 尝试从Redis获取
+        try:
+            result = redis_service.get_json(key)
+            if result is not None:
+                return result
+        except Exception as e:
+            print(f"⚠️ Redis get 失败: {e}")
+        
+        # 2. 尝试从内存缓存获取
+        if key not in self._memory_cache:
             return None
-        if key in self._expires and time.time() > self._expires[key]:
-            del self._cache[key]
-            del self._expires[key]
+        if key in self._memory_expires and time.time() > self._memory_expires[key]:
+            del self._memory_cache[key]
+            del self._memory_expires[key]
             return None
-        return self._cache[key]
+        return self._memory_cache[key]
     
     def set(self, key: str, value: Any, ttl: int = 60):
-        """设置缓存值，ttl 为过期时间（秒）"""
-        self._cache[key] = value
-        self._expires[key] = time.time() + ttl
+        """设置缓存值，优先保存到Redis"""
+        # 1. 保存到Redis
+        try:
+            redis_service.set_json(key, value, expire=ttl)
+        except Exception as e:
+            print(f"⚠️ Redis set 失败: {e}")
+            # 2. 保存到内存缓存作为备选
+            self._memory_cache[key] = value
+            self._memory_expires[key] = time.time() + ttl
     
     def delete(self, key: str):
         """删除缓存"""
-        self._cache.pop(key, None)
-        self._expires.pop(key, None)
+        # 1. 从Redis删除
+        try:
+            redis_service.delete(key)
+        except Exception as e:
+            print(f"⚠️ Redis delete 失败: {e}")
+        
+        # 2. 从内存缓存删除
+        self._memory_cache.pop(key, None)
+        self._memory_expires.pop(key, None)
     
     def clear(self):
         """清空所有缓存"""
-        self._cache.clear()
-        self._expires.clear()
+        # 1. 清空Redis缓存（通过前缀匹配删除）
+        try:
+            keys = redis_service.get_keys("*")
+            for key in keys:
+                redis_service.delete(key)
+        except Exception as e:
+            print(f"⚠️ Redis clear 失败: {e}")
+        
+        # 2. 清空内存缓存
+        self._memory_cache.clear()
+        self._memory_expires.clear()
     
     def clear_prefix(self, prefix: str):
         """清除指定前缀的缓存"""
-        keys_to_delete = [k for k in self._cache if k.startswith(prefix)]
+        # 1. 清除Redis中指定前缀的缓存
+        try:
+            keys = redis_service.get_keys(f"{prefix}*")
+            for key in keys:
+                redis_service.delete(key)
+        except Exception as e:
+            print(f"⚠️ Redis clear_prefix 失败: {e}")
+        
+        # 2. 清除内存缓存中指定前缀的缓存
+        keys_to_delete = [k for k in self._memory_cache if k.startswith(prefix)]
         for key in keys_to_delete:
-            self.delete(key)
+            self._memory_cache.pop(key, None)
+            self._memory_expires.pop(key, None)
 
 
 # 全局缓存实例
@@ -76,11 +120,18 @@ def cached(prefix: str, ttl: int = 30):
             # 尝试从缓存获取
             result = cache.get(key)
             if result is not None:
-                return result
+                # 检查缓存结果是否为协程对象，如果是则重新执行函数
+                if callable(getattr(result, "__await__", None)):
+                    # 清除无效的协程对象缓存
+                    cache.delete(key)
+                else:
+                    return result
             
             # 执行函数并缓存结果
             result = await func(*args, **kwargs)
-            cache.set(key, result, ttl)
+            # 确保缓存的结果不是协程对象
+            if not callable(getattr(result, "__await__", None)):
+                cache.set(key, result, ttl)
             return result
         return wrapper
     return decorator

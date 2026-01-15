@@ -5,6 +5,7 @@ from sqlalchemy import select, update, or_
 from app.models.user import Credential
 from app.services.crypto import decrypt_credential, encrypt_credential
 from app.config import settings
+from app.cache import cached, CACHE_KEYS
 import httpx
 import asyncio
 import logging

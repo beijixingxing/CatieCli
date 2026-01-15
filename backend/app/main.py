@@ -22,12 +22,17 @@ async def lifespan(app: FastAPI):
     from sqlalchemy import delete
     from app.models.user import UsageLog
     from app.services.redis_service import redis_service
+    from app.cache import invalidate_cache
     
     # 启动时初始化
     await init_db()
     
     # 初始化Redis连接
     await redis_service.init_redis()
+    
+    # 清除所有缓存，确保没有旧的协程对象
+    invalidate_cache()
+    print("✅ 已清除所有缓存")
     
     # 自动添加缺失的数据库列（简单迁移）
     try:

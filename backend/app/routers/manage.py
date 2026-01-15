@@ -23,29 +23,8 @@ from app.config import settings
 router = APIRouter(prefix="/api/manage", tags=["管理功能"])
 
 
-# 简单内存缓存
-class SimpleCache:
-    def __init__(self):
-        self._cache = {}
-        self._timestamps = {}
-    
-    def get(self, key):
-        if key not in self._cache:
-            return None
-        # 检查是否过期
-        import time
-        if time.time() - self._timestamps.get(key, 0) > 5:  # 5秒过期
-            del self._cache[key]
-            del self._timestamps[key]
-            return None
-        return self._cache[key]
-    
-    def set(self, key, value, ttl=5):
-        import time
-        self._cache[key] = value
-        self._timestamps[key] = time.time()
-
-cache = SimpleCache()
+# 导入全局缓存实例和装饰器
+from app.cache import cache, CACHE_KEYS, cached
 
 
 # ===== 凭证管理增强 =====

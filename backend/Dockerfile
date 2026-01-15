@@ -9,6 +9,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制代码
 COPY . .
 
+# 健康检查脚本将通过其他方式提供
+
 # 创建数据目录
 RUN mkdir -p /app/data
 

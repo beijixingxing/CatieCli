@@ -16,6 +16,7 @@ services:
     restart: unless-stopped
     networks:
       - 1panel-network
+    # 健康检查配置将在部署环境中添加
 
   # Discord Bot（可选，取消注释启用）
   # bot:
