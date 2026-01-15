@@ -21,9 +21,13 @@ async def lifespan(app: FastAPI):
     from datetime import datetime, timedelta
     from sqlalchemy import delete
     from app.models.user import UsageLog
+    from app.services.redis_service import redis_service
     
     # 启动时初始化
     await init_db()
+    
+    # 初始化Redis连接
+    await redis_service.init_redis()
     
     # 自动添加缺失的数据库列（简单迁移）
     try:
@@ -113,6 +117,9 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
+    
+    # 关闭Redis连接
+    await redis_service.close_redis()
 
 
 app = FastAPI(

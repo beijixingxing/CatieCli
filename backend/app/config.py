@@ -15,6 +15,16 @@ class Settings(BaseSettings):
     # 数据库
     database_url: str = "sqlite+aiosqlite:///./data/gemini_proxy.db"
     
+    # Redis 配置
+    redis_enabled: bool = True
+    redis_url: str = "redis://localhost:6379/0"
+    redis_password: str = ""
+    redis_db: int = 0
+    redis_key_prefix: str = "catiecli:"
+    # Redis 集群模式配置
+    redis_cluster: bool = False  # 是否启用集群模式
+    redis_cluster_nodes: list = []  # 集群节点列表，如 ["redis://node1:6379", "redis://node2:6379"]
+    
     # JWT
     secret_key: str = "your-super-secret-key-change-this"
     algorithm: str = "HS256"
