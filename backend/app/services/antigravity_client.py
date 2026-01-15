@@ -232,6 +232,8 @@ class AntigravityClient:
         generation_config = self._build_generation_config(model, kwargs)
         gemini_model = self._map_model_name(model)
         
+        print(f"[AntigravityClient] 模型名映射: {model} -> {gemini_model}", flush=True)
+        
         result = await self.generate_content(gemini_model, contents, generation_config, system_instruction)
         return self._convert_to_openai_response(result, model)
     
