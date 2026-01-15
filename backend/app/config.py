@@ -113,11 +113,9 @@ class Settings(BaseSettings):
     
     # Antigravity API 反代配置
     antigravity_enabled: bool = True  # 是否启用 Antigravity API 反代
-    antigravity_api_base: str = "https://cloudcode-pa.googleapis.com"
-    # Antigravity OAuth (不同于 GeminiCLI，需要使用 Antigravity 自己的 OAuth 凭证)
-    antigravity_client_id: str = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
-    # 注意：client_secret 需要通过环境变量 ANTIGRAVITY_CLIENT_SECRET 设置，或从凭证自带
-    antigravity_client_secret: str = ""
+    antigravity_api_base: str = "https://daily-cloudcode-pa.sandbox.googleapis.com"
+    # Antigravity OAuth 配置在 antigravity_oauth.py 中硬编码
+    # (使用 Antigravity 专用的 OAuth Client，与 GeminiCLI 不同)
     
     # Discord OAuth (可选，用于 Discord 登录/注册)
     discord_client_id: str = ""

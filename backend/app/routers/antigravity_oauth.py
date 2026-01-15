@@ -301,17 +301,21 @@ async def antigravity_credential_from_callback_url(
             # 更新现有凭证
             existing.api_key = encrypt_credential(access_token)
             existing.refresh_token = encrypt_credential(refresh_token)
+            existing.client_id = encrypt_credential(ANTIGRAVITY_CLIENT_ID)
+            existing.client_secret = encrypt_credential(ANTIGRAVITY_CLIENT_SECRET)
             existing.project_id = project_id
             credential = existing
             is_new_credential = False
             print(f"[Antigravity OAuth] 更新现有凭证: {email}", flush=True)
         else:
-            # 创建新凭证
+            # 创建新凭证（必须包含 client_id 和 client_secret 用于 token 刷新）
             credential = Credential(
                 user_id=user.id,
                 name=f"Antigravity - {email}",
                 api_key=encrypt_credential(access_token),
                 refresh_token=encrypt_credential(refresh_token),
+                client_id=encrypt_credential(ANTIGRAVITY_CLIENT_ID),
+                client_secret=encrypt_credential(ANTIGRAVITY_CLIENT_SECRET),
                 project_id=project_id,
                 credential_type="oauth",
                 email=email,
