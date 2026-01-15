@@ -448,8 +448,17 @@ class AntigravityClient:
         return contents, system_instruction
     
     def _map_model_name(self, model: str) -> str:
-        """映射模型名称（Antigravity 不支持流式前缀和思考后缀，直接返回原模型名）"""
-        # Antigravity 不需要移除任何前缀或后缀，模型名直接传递
+        """映射模型名称 - 移除自定义前缀"""
+        # 移除 agy- 前缀 (CatieCli 自定义)
+        if model.startswith("agy-"):
+            model = model[4:]
+        # 移除 gcli- 前缀 (如果有)
+        if model.startswith("gcli-"):
+            model = model[5:]
+        # 移除 假流式/ 和 流式抗截断/ 前缀
+        for prefix in ["假流式/", "流式抗截断/"]:
+            if model.startswith(prefix):
+                model = model[len(prefix):]
         return model
     
     def _convert_to_openai_response(self, gemini_response: dict, model: str) -> dict:
