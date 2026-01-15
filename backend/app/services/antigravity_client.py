@@ -89,6 +89,12 @@ class AntigravityClient:
             {"category": "HARM_CATEGORY_IMAGE_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_JAILBREAK", "threshold": "BLOCK_NONE"},
         ]
+        # 对 Claude 模型应用思考块修复 (与 gcli2api 一致)
+        if generation_config is None:
+            generation_config = {}
+        self._apply_claude_thinking_fix(model, contents, generation_config)
+        if generation_config:
+            request_body["generationConfig"] = generation_config
         
         payload = {
             "model": model,
@@ -169,6 +175,13 @@ class AntigravityClient:
             {"category": "HARM_CATEGORY_IMAGE_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_JAILBREAK", "threshold": "BLOCK_NONE"},
         ]
+        
+        # 对 Claude 模型应用思考块修复 (与 gcli2api 一致)
+        if generation_config is None:
+            generation_config = {}
+        self._apply_claude_thinking_fix(model, contents, generation_config)
+        if generation_config:
+            request_body["generationConfig"] = generation_config
         
         payload = {
             "model": model,
@@ -405,6 +418,47 @@ class AntigravityClient:
     def _is_thinking_model(self, model: str) -> bool:
         """检查是否为思考模型 (与 gcli2api gemini_fix.py 第111-113行一致)"""
         return "think" in model.lower() or "pro" in model.lower() or "claude" in model.lower()
+    
+    def _apply_claude_thinking_fix(self, model: str, contents: list, generation_config: dict) -> None:
+        """
+        对 Claude 模型应用思考块修复 (与 gcli2api gemini_fix.py 第217-254行一致)
+        
+        当存在历史对话时，在最后一个 model 消息开头插入带有
+        thoughtSignature: skip_thought_signature_validator 的思考块
+        """
+        if "claude" not in model.lower():
+            return
+        
+        # 检测是否有工具调用（MCP场景）
+        has_tool_calls = any(
+            isinstance(content, dict) and 
+            any(
+                isinstance(part, dict) and ("functionCall" in part or "function_call" in part)
+                for part in content.get("parts", [])
+            )
+            for content in contents
+        )
+        
+        if has_tool_calls:
+            # MCP 场景：检测到工具调用，移除 thinkingConfig
+            print(f"[AntigravityClient] 检测到工具调用（MCP场景），移除 thinkingConfig", flush=True)
+            generation_config.pop("thinkingConfig", None)
+        else:
+            # 非 MCP 场景：在最后一个 model 消息开头插入思考块
+            for i in range(len(contents) - 1, -1, -1):
+                content = contents[i]
+                if isinstance(content, dict) and content.get("role") == "model":
+                    parts = content.get("parts", [])
+                    # 使用官方跳过验证的虚拟签名
+                    thinking_part = {
+                        "text": "...",
+                        "thoughtSignature": "skip_thought_signature_validator"
+                    }
+                    # 如果第一个 part 不是 thinking，则插入
+                    if not parts or not (isinstance(parts[0], dict) and ("thought" in parts[0] or "thoughtSignature" in parts[0])):
+                        content["parts"] = [thinking_part] + parts
+                        print(f"[AntigravityClient] 已在最后一个 assistant 消息开头插入思考块（含跳过验证签名）", flush=True)
+                    break
     
     def _convert_messages_to_contents(self, messages: list) -> tuple:
         """将OpenAI消息格式转换为Gemini contents格式"""
