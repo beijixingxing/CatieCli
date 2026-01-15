@@ -59,6 +59,7 @@ export default function Settings() {
       formData.append('stats_quota_flash', config.stats_quota_flash ?? 0)
       formData.append('stats_quota_25pro', config.stats_quota_25pro ?? 0)
       formData.append('stats_quota_30pro', config.stats_quota_30pro ?? 0)
+      formData.append('antigravity_enabled', config.antigravity_enabled)
       
       await api.post('/api/manage/config', formData)
       setMessage({ type: 'success', text: '配置已保存！' })
@@ -488,6 +489,28 @@ export default function Settings() {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Antigravity 反代 */}
+          <div className="pt-4 border-t border-gray-700">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="font-semibold">🚀 Antigravity 反代</h3>
+                <p className="text-gray-400 text-sm">启用 Antigravity API 反代功能（/antigravity 路径）</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={config?.antigravity_enabled || false}
+                  onChange={(e) => setConfig({ ...config, antigravity_enabled: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+              </label>
+            </div>
+            <p className="text-gray-500 text-sm mt-2">
+              💡 Antigravity 使用沙盒 API 端点，支持动态模型列表获取
+            </p>
           </div>
 
           {/* 保存按钮 */}

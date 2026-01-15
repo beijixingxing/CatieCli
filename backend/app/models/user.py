@@ -85,7 +85,15 @@ class UsageLog(Base):
 
 
 class Credential(Base):
-    """Gemini凭证池"""
+    """Gemini凭证池
+    
+    凭证类型 (api_type):
+    - geminicli: GeminiCLI 凭证，使用 GeminiCLI User-Agent
+    - antigravity: Antigravity 凭证，使用 Antigravity User-Agent
+    
+    注意：GeminiCLI 和 Antigravity 是完全独立的凭证体系，不能混用！
+    同一个 Google 账号需要分别认证才能获得两种凭证。
+    """
     __tablename__ = "credentials"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -95,7 +103,9 @@ class Credential(Base):
     refresh_token = Column(Text, nullable=True)  # OAuth refresh_token
     client_id = Column(Text, nullable=True)  # OAuth client_id（加密存储）
     client_secret = Column(Text, nullable=True)  # OAuth client_secret（加密存储）
-    project_id = Column(String(200), nullable=True)  # Google Cloud Project ID
+    project_id = Column(String(200), nullable=True)  # Project ID（两种类型都需要）
+    # 凭证类型：geminicli 或 antigravity（独立的凭证体系）
+    api_type = Column(String(20), default="geminicli", index=True)  # geminicli 或 antigravity
     credential_type = Column(String(20), default="api_key")  # api_key 或 oauth
     model_tier = Column(String(10), default="2.5")  # 模型等级: "3" 或 "2.5"
     account_type = Column(String(20), default="free")  # 账号类型: "pro" 或 "free"
@@ -107,10 +117,12 @@ class Credential(Base):
     last_used_at = Column(DateTime, nullable=True)
     last_error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    # CD 机制：按模型组记录最后使用时间
+    # CD 机制：按模型组记录最后使用时间（适用于两种凭证类型）
     last_used_flash = Column(DateTime, nullable=True)  # Flash 模型组 CD
     last_used_pro = Column(DateTime, nullable=True)    # Pro 模型组 CD
     last_used_30 = Column(DateTime, nullable=True)     # 3.0 模型组 CD
+    # 模型级 CD 机制（JSON 格式 {"model_name": "timestamp"}）
+    model_cooldowns = Column(Text, nullable=True)
     
     # 关系
     owner = relationship("User", back_populates="credentials")

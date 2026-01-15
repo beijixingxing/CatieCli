@@ -11,6 +11,7 @@ import {
     LogOut,
     RefreshCcw,
     RefreshCw,
+    Rocket,
     Settings,
     Shield,
     Trash2,
@@ -336,6 +337,10 @@ export default function Dashboard() {
               <Link to="/admin" className="text-gray-400 hover:text-white flex items-center gap-1 text-sm whitespace-nowrap">
                 <Users size={16} />
                 用户
+              </Link>
+              <Link to="/antigravity-credentials" className="text-orange-400 hover:text-orange-300 flex items-center gap-1 text-sm whitespace-nowrap">
+                <Rocket size={16} />
+                Antigravity
               </Link>
             </div>
           )}

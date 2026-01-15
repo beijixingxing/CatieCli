@@ -201,13 +201,32 @@ async def options_handler():
 
 @router.get("/v1/models")
 async def list_models(request: Request, user: User = Depends(get_user_from_api_key), db: AsyncSession = Depends(get_db)):
-    """列出可用模型 (OpenAI兼容)"""
+    """列出可用模型 (OpenAI兼容) - 同时包含 GeminiCLI 和 Antigravity 模型
+    
+    模型命名规则：
+    - GeminiCLI: 无前缀（向后兼容）或 gcli- 前缀，支持思考/搜索后缀
+    - Antigravity: agy- 前缀，只支持流式前缀，无思考/搜索后缀
+    """
     from app.models.user import Credential
+    from sqlalchemy import or_
     
-    # 检查是否有可用的 3.0 凭证
-    has_tier3_creds = await CredentialPool.has_tier3_credentials(user, db)
+    # 检查是否有可用的 GeminiCLI 3.0 凭证
+    has_cli_tier3 = await CredentialPool.has_tier3_credentials(user, db, mode="geminicli")
     
-    has_tier3 = await CredentialPool.has_tier3_credentials(user, db)
+    # 检查是否有可用的 Antigravity 凭证
+    has_agy_creds = await db.execute(
+        select(func.count(Credential.id))
+        .where(Credential.api_type == "antigravity")
+        .where(Credential.is_active == True)
+        .where(or_(
+            Credential.user_id == user.id,
+            Credential.is_public == True
+        ))
+    )
+    has_antigravity = (has_agy_creds.scalar() or 0) > 0
+    
+    # 检查是否有可用的 Antigravity 3.0 凭证
+    has_agy_tier3 = await CredentialPool.has_tier3_credentials(user, db, mode="antigravity") if has_antigravity else False
     
     # 基础模型 (Gemini 2.5+)
     base_models = [
@@ -215,10 +234,7 @@ async def list_models(request: Request, user: User = Depends(get_user_from_api_k
         "gemini-2.5-flash",
     ]
     
-    # 只有有 3.0 凭证时才添加 3.0 模型
-    if has_tier3:
-        base_models.append("gemini-3-pro-preview")
-        base_models.append("gemini-3-flash-preview")
+    tier3_models = ["gemini-3-pro-preview", "gemini-3-flash-preview"]
     
     # Thinking 后缀
     thinking_suffixes = ["-maxthinking", "-nothinking"]
@@ -226,36 +242,113 @@ async def list_models(request: Request, user: User = Depends(get_user_from_api_k
     search_suffix = "-search"
     
     models = []
-    for base in base_models:
-        # 基础模型
+    
+    # === GeminiCLI 模型（无前缀向后兼容 + gcli- 前缀）===
+    cli_base_models = base_models.copy()
+    if has_cli_tier3:
+        cli_base_models.extend(tier3_models)
+    
+    for base in cli_base_models:
+        # 不带前缀的基础模型（向后兼容）
         models.append({"id": base, "object": "model", "owned_by": "google"})
-        
-        # 假流式模型
         models.append({"id": f"假流式/{base}", "object": "model", "owned_by": "google"})
-        # 流式抗截断模型
         models.append({"id": f"流式抗截断/{base}", "object": "model", "owned_by": "google"})
         
-        # thinking 变体
+        # 带 gcli- 前缀的模型
+        models.append({"id": f"gcli-{base}", "object": "model", "owned_by": "google"})
+        models.append({"id": f"假流式/gcli-{base}", "object": "model", "owned_by": "google"})
+        models.append({"id": f"流式抗截断/gcli-{base}", "object": "model", "owned_by": "google"})
+        
+        # thinking 变体（无前缀）
         for suffix in thinking_suffixes:
             models.append({"id": f"{base}{suffix}", "object": "model", "owned_by": "google"})
             models.append({"id": f"假流式/{base}{suffix}", "object": "model", "owned_by": "google"})
             models.append({"id": f"流式抗截断/{base}{suffix}", "object": "model", "owned_by": "google"})
         
-        # search 变体
+        # thinking 变体（gcli- 前缀）
+        for suffix in thinking_suffixes:
+            models.append({"id": f"gcli-{base}{suffix}", "object": "model", "owned_by": "google"})
+            models.append({"id": f"假流式/gcli-{base}{suffix}", "object": "model", "owned_by": "google"})
+            models.append({"id": f"流式抗截断/gcli-{base}{suffix}", "object": "model", "owned_by": "google"})
+        
+        # search 变体（无前缀）
         models.append({"id": f"{base}{search_suffix}", "object": "model", "owned_by": "google"})
         models.append({"id": f"假流式/{base}{search_suffix}", "object": "model", "owned_by": "google"})
         models.append({"id": f"流式抗截断/{base}{search_suffix}", "object": "model", "owned_by": "google"})
         
-        # thinking + search 组合
+        # search 变体（gcli- 前缀）
+        models.append({"id": f"gcli-{base}{search_suffix}", "object": "model", "owned_by": "google"})
+        models.append({"id": f"假流式/gcli-{base}{search_suffix}", "object": "model", "owned_by": "google"})
+        models.append({"id": f"流式抗截断/gcli-{base}{search_suffix}", "object": "model", "owned_by": "google"})
+        
+        # thinking + search 组合（无前缀）
         for suffix in thinking_suffixes:
             combined = f"{suffix}{search_suffix}"
             models.append({"id": f"{base}{combined}", "object": "model", "owned_by": "google"})
             models.append({"id": f"假流式/{base}{combined}", "object": "model", "owned_by": "google"})
             models.append({"id": f"流式抗截断/{base}{combined}", "object": "model", "owned_by": "google"})
+        
+        # thinking + search 组合（gcli- 前缀）
+        for suffix in thinking_suffixes:
+            combined = f"{suffix}{search_suffix}"
+            models.append({"id": f"gcli-{base}{combined}", "object": "model", "owned_by": "google"})
+            models.append({"id": f"假流式/gcli-{base}{combined}", "object": "model", "owned_by": "google"})
+            models.append({"id": f"流式抗截断/gcli-{base}{combined}", "object": "model", "owned_by": "google"})
     
     # Image 模型
     models.append({"id": "gemini-2.5-flash-image", "object": "model", "owned_by": "google"})
+    models.append({"id": "gcli-gemini-2.5-flash-image", "object": "model", "owned_by": "google"})
     
+    # === Antigravity 模型（agy- 前缀，从 API 动态获取，无流式前缀和思考/搜索后缀）===
+    if has_antigravity and settings.antigravity_enabled:
+        # 尝试从 Antigravity API 动态获取模型列表
+        try:
+            from app.services.antigravity_client import AntigravityClient
+            from sqlalchemy import or_
+            
+            # 获取一个有效的 Antigravity 凭证
+            agy_cred_result = await db.execute(
+                select(Credential)
+                .where(Credential.api_type == "antigravity")
+                .where(Credential.is_active == True)
+                .where(or_(
+                    Credential.user_id == user.id,
+                    Credential.is_public == True
+                ))
+                .limit(1)
+            )
+            agy_cred = agy_cred_result.scalar_one_or_none()
+            
+            if agy_cred:
+                access_token = await CredentialPool.get_access_token(agy_cred, db)
+                if access_token:
+                    client = AntigravityClient(access_token, agy_cred.project_id)
+                    api_models = await client.fetch_available_models()
+                    
+                    # 添加 API 返回的模型（加上 agy- 前缀，无流式前缀）
+                    for model_info in api_models:
+                        model_id = model_info.get("id", "")
+                        if model_id:
+                            models.append({
+                                "id": f"agy-{model_id}",
+                                "object": "model",
+                                "owned_by": "google"
+                            })
+                    
+                    # 额外添加 claude-opus-4-5（如果 API 没返回）
+                    existing_ids = [m["id"] for m in models]
+                    if "agy-claude-opus-4-5" not in existing_ids:
+                        models.append({"id": "agy-claude-opus-4-5", "object": "model", "owned_by": "google"})
+        except Exception as e:
+            print(f"[Models] 获取 Antigravity 模型列表失败: {e}", flush=True)
+            # 降级：使用静态模型列表
+            fallback_agy_models = [
+                "gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash", "gemini-3-pro-low",
+                "gemini-3-pro-high", "gemini-2.5-flash-thinking", "claude-opus-4-5",
+                "claude-opus-4-5-thinking", "claude-sonnet-4-5", "claude-sonnet-4-5-thinking"
+            ]
+            for base in fallback_agy_models:
+                models.append({"id": f"agy-{base}", "object": "model", "owned_by": "google"})
     
     return {"object": "list", "data": models}
 
@@ -267,22 +360,75 @@ async def chat_completions(
     user: User = Depends(get_user_from_api_key),
     db: AsyncSession = Depends(get_db)
 ):
-    """Chat Completions (OpenAI兼容)"""
+    """Chat Completions (OpenAI兼容) - 支持 agy- 和 gcli- 前缀
+    
+    路由规则：
+    - agy-xxx 前缀 → Antigravity 代理
+    - gcli-xxx 前缀或无前缀 → GeminiCLI 代理
+    - 流式前缀（假流式/、流式抗截断/）保留，由对应代理处理
+    """
+    try:
+        body = await request.json()
+    except:
+        raise HTTPException(status_code=400, detail="无效的JSON请求体")
+    
+    model = body.get("model", "gemini-2.5-flash")
+    
+    # 提取流式前缀（如果有）
+    stream_prefix = ""
+    model_without_stream = model
+    if model.startswith("假流式/"):
+        stream_prefix = "假流式/"
+        model_without_stream = model[4:]  # len("假流式/") = 4
+    elif model.startswith("流式抗截断/"):
+        stream_prefix = "流式抗截断/"
+        model_without_stream = model[6:]  # len("流式抗截断/") = 6
+    
+    # 检测是否是 Antigravity 请求（模型名包含 agy- 前缀）
+    is_antigravity = model_without_stream.startswith("agy-")
+    if is_antigravity:
+        # 检查 Antigravity 功能是否启用
+        if not settings.antigravity_enabled:
+            raise HTTPException(status_code=503, detail="Antigravity API 功能已禁用")
+        
+        # 移除 agy- 前缀，保留流式前缀，传递给 Antigravity 代理
+        clean_model = model_without_stream[4:]  # 移除 "agy-"
+        body["model"] = stream_prefix + clean_model
+        
+        # 调用 Antigravity 代理处理
+        from app.routers.antigravity_proxy import chat_completions as agy_chat_completions
+        
+        # 创建一个新的 Request 对象，包含修改后的 body
+        # 由于 FastAPI 的 Request 对象不可变，我们需要通过 Starlette 的方式处理
+        from starlette.requests import Request as StarletteRequest
+        from starlette.datastructures import Headers
+        import io
+        
+        # 将修改后的 body 序列化
+        modified_body = json.dumps(body).encode()
+        
+        # 创建一个新的 scope，复制原有的但修改 body
+        async def receive():
+            return {"type": "http.request", "body": modified_body}
+        
+        new_request = StarletteRequest(scope=request.scope, receive=receive)
+        
+        return await agy_chat_completions(new_request, background_tasks, user, db)
+    
+    # 移除 gcli- 前缀（如果有），保留流式前缀
+    if model_without_stream.startswith("gcli-"):
+        clean_model = model_without_stream[5:]  # 移除 "gcli-"
+        model = stream_prefix + clean_model
+        body["model"] = model
+    
     start_time = time.time()
     
     # 获取客户端信息
     client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown").split(",")[0].strip()
     user_agent = request.headers.get("User-Agent", "")[:500]
     
-    try:
-        body = await request.json()
-    except:
-        raise HTTPException(status_code=400, detail="无效的JSON请求体")
-    
     # 保存请求内容摘要（截断到2000字符）
     request_body_str = json.dumps(body, ensure_ascii=False)[:2000] if body else None
-    
-    model = body.get("model", "gemini-2.5-flash")
     messages = body.get("messages", [])
     stream = body.get("stream", False)
     

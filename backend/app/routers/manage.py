@@ -906,6 +906,7 @@ async def get_config(user: User = Depends(get_current_admin)):
         "stats_quota_flash": settings.stats_quota_flash,
         "stats_quota_25pro": settings.stats_quota_25pro,
         "stats_quota_30pro": settings.stats_quota_30pro,
+        "antigravity_enabled": settings.antigravity_enabled,
     }
 
 
@@ -970,6 +971,7 @@ async def update_config(
     stats_quota_flash: Optional[int] = Form(None),
     stats_quota_25pro: Optional[int] = Form(None),
     stats_quota_30pro: Optional[int] = Form(None),
+    antigravity_enabled: Optional[bool] = Form(None),
     user: User = Depends(get_current_admin)
 ):
     """更新配置（持久化保存到数据库）"""
@@ -1113,6 +1115,12 @@ async def update_config(
         settings.stats_quota_30pro = stats_quota_30pro
         await save_config_to_db("stats_quota_30pro", stats_quota_30pro)
         updated["stats_quota_30pro"] = stats_quota_30pro
+    
+    # Antigravity 反代配置
+    if antigravity_enabled is not None:
+        settings.antigravity_enabled = antigravity_enabled
+        await save_config_to_db("antigravity_enabled", antigravity_enabled)
+        updated["antigravity_enabled"] = antigravity_enabled
     
     return {"message": "配置已保存", "updated": updated}
 

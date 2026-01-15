@@ -554,12 +554,21 @@ async def upload_credentials(
 
 @router.get("/credentials")
 async def list_my_credentials(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """获取我的凭证列表"""
+    """获取我的凭证列表（仅 GeminiCLI 凭证）"""
     from datetime import datetime, timedelta
     from app.config import settings
+    from sqlalchemy import or_
     
+    # 只返回 GeminiCLI 凭证（api_type 为 geminicli 或 NULL/空）
     result = await db.execute(
-        select(Credential).where(Credential.user_id == user.id).order_by(Credential.created_at.desc())
+        select(Credential)
+        .where(Credential.user_id == user.id)
+        .where(or_(
+            Credential.api_type == "geminicli",
+            Credential.api_type == None,
+            Credential.api_type == ""
+        ))
+        .order_by(Credential.created_at.desc())
     )
     creds = result.scalars().all()
     

@@ -111,6 +111,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""  # 如果填写，则支持真正的 OpenAI API 反代
     openai_api_base: str = "https://api.openai.com"
     
+    # Antigravity API 反代配置
+    antigravity_enabled: bool = True  # 是否启用 Antigravity API 反代
+    antigravity_api_base: str = "https://daily-cloudcode-pa.sandbox.googleapis.com"
+    
     # Discord OAuth (可选，用于 Discord 登录/注册)
     discord_client_id: str = ""
     discord_client_secret: str = ""
@@ -154,6 +158,7 @@ PERSISTENT_CONFIG_KEYS = [
     "announcement_title",
     "announcement_content",
     "announcement_read_seconds",
+    "antigravity_enabled",
 ]
 
 

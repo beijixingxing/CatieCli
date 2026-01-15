@@ -18,6 +18,11 @@ async def post_async(url: str, json: dict = None, headers: dict = None, timeout:
         return await client.post(url, json=json, headers=headers)
 
 
+# User-Agent 常量
+GEMINICLI_USER_AGENT = "grpc-java-okhttp/1.68.1"
+ANTIGRAVITY_USER_AGENT = "grpc-node/1.24.11 grpc-c/42.0.0 (linux; chttp2)"
+
+
 async def fetch_project_id(
     access_token: str,
     user_agent: str,
@@ -267,7 +272,97 @@ async def _get_onboard_tier(
 
 
 class CredentialPool:
-    """Gemini凭证池管理"""
+    """Gemini凭证池管理
+    
+    支持两种独立的凭证类型（通过 mode 参数区分）：
+    - geminicli: GeminiCLI 凭证
+    - antigravity: Antigravity 凭证
+    
+    注意：这两种凭证是完全独立的，不能混用！
+    """
+    
+    @staticmethod
+    def validate_mode(mode: str) -> str:
+        """验证 mode 参数"""
+        if mode not in ["geminicli", "antigravity"]:
+            raise ValueError(f"无效的 mode 参数: {mode}，只支持 'geminicli' 或 'antigravity'")
+        return mode
+    
+    @staticmethod
+    def get_user_agent(mode: str) -> str:
+        """根据 mode 返回对应的 User-Agent"""
+        if mode == "antigravity":
+            return ANTIGRAVITY_USER_AGENT
+        return GEMINICLI_USER_AGENT
+    
+    @staticmethod
+    def get_api_base(mode: str) -> str:
+        """根据 mode 返回对应的 API Base URL"""
+        if mode == "antigravity":
+            return settings.antigravity_api_base
+        return settings.code_assist_endpoint
+    
+    @staticmethod
+    async def fetch_project_id_for_mode(access_token: str, mode: str = "geminicli") -> Optional[str]:
+        """
+        根据 mode 获取对应的 project_id
+        
+        Args:
+            access_token: OAuth access token
+            mode: 凭证模式 ("geminicli" 或 "antigravity")
+            
+        Returns:
+            project_id，失败返回 None
+        """
+        mode = CredentialPool.validate_mode(mode)
+        return await fetch_project_id(
+            access_token=access_token,
+            user_agent=CredentialPool.get_user_agent(mode),
+            api_base_url=CredentialPool.get_api_base(mode)
+        )
+    
+    @staticmethod
+    async def get_access_token_and_project(
+        credential: 'Credential',
+        db: AsyncSession,
+        mode: str = "geminicli"
+    ) -> tuple[Optional[str], Optional[str]]:
+        """
+        获取凭证的 access_token 和 project_id
+        如果没有 project_id，会自动获取并保存
+        
+        Args:
+            credential: 凭证对象
+            db: 数据库会话
+            mode: 凭证模式 ("geminicli" 或 "antigravity")
+        
+        Returns:
+            (access_token, project_id) 元组
+        """
+        mode = CredentialPool.validate_mode(mode)
+        
+        # 刷新 access_token
+        access_token = await CredentialPool.get_access_token(credential, db)
+        if not access_token:
+            return None, None
+        
+        # 检查是否有 project_id
+        if credential.project_id:
+            return access_token, credential.project_id
+        
+        # 自动获取 project_id
+        print(f"[{mode}] 凭证 {credential.email} 没有 project_id，正在获取...", flush=True)
+        project_id = await CredentialPool.fetch_project_id_for_mode(access_token, mode)
+        
+        if project_id:
+            # 保存到数据库
+            credential.project_id = project_id
+            await db.commit()
+            print(f"[{mode}] 凭证 {credential.email} 获取到 project_id: {project_id}", flush=True)
+            return access_token, project_id
+        else:
+            print(f"[{mode}] 凭证 {credential.email} 无法获取 project_id", flush=True)
+            return access_token, None
     
     @staticmethod
     def get_required_tier(model: str) -> str:
@@ -328,11 +423,13 @@ class CredentialPool:
         return datetime.utcnow() < cd_end_time
     
     @staticmethod
-    async def check_user_has_tier3_creds(db: AsyncSession, user_id: int) -> bool:
+    async def check_user_has_tier3_creds(db: AsyncSession, user_id: int, mode: str = "geminicli") -> bool:
         """检查用户是否有 3.0 等级的凭证"""
+        mode = CredentialPool.validate_mode(mode)
         result = await db.execute(
             select(Credential)
             .where(Credential.user_id == user_id)
+            .where(Credential.api_type == mode)
             .where(Credential.model_tier == "3")
             .where(Credential.is_active == True)
             .limit(1)
@@ -340,11 +437,13 @@ class CredentialPool:
         return result.scalar_one_or_none() is not None
     
     @staticmethod
-    async def has_tier3_credentials(user, db: AsyncSession) -> bool:
+    async def has_tier3_credentials(user, db: AsyncSession, mode: str = "geminicli") -> bool:
         """检查用户可用的凭证池中是否有 3.0 凭证（用于模型列表显示）"""
+        mode = CredentialPool.validate_mode(mode)
         pool_mode = settings.credential_pool_mode
         query = select(Credential).where(
             Credential.is_active == True,
+            Credential.api_type == mode,
             Credential.model_tier == "3"
         ).limit(1)
         
@@ -354,7 +453,7 @@ class CredentialPool:
         
         elif pool_mode == "tier3_shared":
             # 3.0共享模式：有3.0凭证的用户可用公共3.0池
-            user_has_tier3 = await CredentialPool.check_user_has_tier3_creds(db, user.id)
+            user_has_tier3 = await CredentialPool.check_user_has_tier3_creds(db, user.id, mode)
             if user_has_tier3:
                 query = query.where(
                     or_(Credential.is_public == True, Credential.user_id == user.id)
@@ -363,7 +462,7 @@ class CredentialPool:
                 query = query.where(Credential.user_id == user.id)
         
         else:  # full_shared (大锅饭模式)
-            user_has_public = await CredentialPool.check_user_has_public_creds(db, user.id)
+            user_has_public = await CredentialPool.check_user_has_public_creds(db, user.id, mode)
             if user_has_public:
                 query = query.where(
                     or_(Credential.is_public == True, Credential.user_id == user.id)
@@ -376,16 +475,25 @@ class CredentialPool:
     
     @staticmethod
     async def get_available_credential(
-        db: AsyncSession, 
+        db: AsyncSession,
         user_id: int = None,
         user_has_public_creds: bool = False,
         model: str = None,
-        exclude_ids: set = None
+        exclude_ids: set = None,
+        mode: str = "geminicli"
     ) -> Optional[Credential]:
         """
         获取一个可用的凭证 (根据模式 + 轮询策略 + 模型等级匹配)
         
-        模式:
+        Args:
+            db: 数据库会话
+            user_id: 用户ID
+            user_has_public_creds: 用户是否有公共凭证
+            model: 模型名称
+            exclude_ids: 排除的凭证ID集合（用于重试时跳过已失败的凭证）
+            mode: 凭证类型 ("geminicli" 或 "antigravity")
+        
+        池模式:
         - private: 只能用自己的凭证
         - tier3_shared: 有3.0凭证的用户可用公共3.0池
         - full_shared: 大锅饭模式（捐赠凭证即可用所有公共池）
@@ -393,11 +501,13 @@ class CredentialPool:
         模型等级规则:
         - 3.0 模型只能用 3.0 等级的凭证
         - 2.5 模型可以用任何等级的凭证
-        
-        exclude_ids: 排除的凭证ID集合（用于重试时跳过已失败的凭证）
         """
+        mode = CredentialPool.validate_mode(mode)
         pool_mode = settings.credential_pool_mode
-        query = select(Credential).where(Credential.is_active == True)
+        query = select(Credential).where(
+            Credential.is_active == True,
+            Credential.api_type == mode  # 按凭证类型过滤
+        )
         
         # 排除没有 project_id 的凭证（没有 project_id 无法调用 API）
         query = query.where(Credential.project_id != None, Credential.project_id != "")
@@ -423,7 +533,7 @@ class CredentialPool:
             # 3.0共享模式：
             # - 请求3.0模型：需要有3.0凭证才能用公共3.0池
             # - 请求2.5模型：所有用户都可以用公共2.5凭证
-            user_has_tier3 = await CredentialPool.check_user_has_tier3_creds(db, user_id)
+            user_has_tier3 = await CredentialPool.check_user_has_tier3_creds(db, user_id, mode)
             
             if required_tier == "3":
                 # 请求3.0模型
@@ -485,11 +595,11 @@ class CredentialPool:
         if not available_credentials:
             # 所有凭证都在 CD 中，选择第一个（按 last_used_at 排序的）
             credential = credentials[0]
-            print(f"[CD] 模型组={model_group}, CD={cd_seconds}秒 | 全部{total_count}个凭证都在CD中，选择: {credential.email}", flush=True)
+            print(f"[{mode}][CD] 模型组={model_group}, CD={cd_seconds}秒 | 全部{total_count}个凭证都在CD中，选择: {credential.email}", flush=True)
         else:
             # 选择最久未使用的凭证
             credential = available_credentials[0]
-            print(f"[CD] 模型组={model_group}, CD={cd_seconds}秒 | 可用{available_count}/{total_count}个, 选择: {credential.email}", flush=True)
+            print(f"[{mode}][CD] 模型组={model_group}, CD={cd_seconds}秒 | 可用{available_count}/{total_count}个, 选择: {credential.email}", flush=True)
         
         # 更新使用时间和计数
         now = datetime.utcnow()
@@ -509,11 +619,13 @@ class CredentialPool:
         return credential
     
     @staticmethod
-    async def check_user_has_public_creds(db: AsyncSession, user_id: int) -> bool:
+    async def check_user_has_public_creds(db: AsyncSession, user_id: int, mode: str = "geminicli") -> bool:
         """检查用户是否有公开的凭证（是否参与大锅饭）"""
+        mode = CredentialPool.validate_mode(mode)
         result = await db.execute(
             select(Credential)
             .where(Credential.user_id == user_id)
+            .where(Credential.api_type == mode)
             .where(Credential.is_public == True)
             .where(Credential.is_active == True)
             .limit(1)
@@ -567,6 +679,38 @@ class CredentialPool:
             return None
     
     @staticmethod
+    def _is_token_expired(credential: Credential) -> bool:
+        """检查 token 是否过期（提前 5 分钟判定）"""
+        # 如果没有 api_key（access_token），需要刷新
+        if not credential.api_key:
+            return True
+        
+        # 如果有过期时间字段（expiry），检查是否过期
+        if hasattr(credential, 'token_expiry') and credential.token_expiry:
+            try:
+                from datetime import datetime, timedelta, timezone
+                expiry = credential.token_expiry
+                if isinstance(expiry, str):
+                    if expiry.endswith("Z"):
+                        expiry = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+                    else:
+                        expiry = datetime.fromisoformat(expiry)
+                
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+                
+                # 提前 5 分钟判定过期
+                now = datetime.now(timezone.utc)
+                buffer = timedelta(minutes=5)
+                return (expiry - buffer) <= now
+            except Exception as e:
+                print(f"[Token检查] 解析过期时间失败: {e}", flush=True)
+                return True  # 无法解析时判定为过期
+        
+        # 如果没有过期时间，每次都刷新（保守策略）
+        return True
+    
+    @staticmethod
     async def get_access_token(credential: Credential, db: AsyncSession) -> Optional[str]:
         """
         获取可用的 access_token
@@ -574,14 +718,28 @@ class CredentialPool:
         """
         # OAuth 凭证需要刷新
         if credential.credential_type == "oauth" and credential.refresh_token:
-            # 尝试刷新 token
-            new_token = await CredentialPool.refresh_access_token(credential)
-            if new_token:
-                # 更新数据库中的 access_token
-                credential.api_key = encrypt_credential(new_token)
-                await db.commit()
-                return new_token
-            return None
+            # 检查 token 是否过期
+            if CredentialPool._is_token_expired(credential):
+                print(f"[Token] 凭证 {credential.email or credential.id} 的 token 已过期或不存在，尝试刷新...", flush=True)
+                # 尝试刷新 token
+                new_token = await CredentialPool.refresh_access_token(credential)
+                if new_token:
+                    # 更新数据库中的 access_token
+                    credential.api_key = encrypt_credential(new_token)
+                    await db.commit()
+                    print(f"[Token] 凭证 {credential.email or credential.id} 刷新成功", flush=True)
+                    return new_token
+                else:
+                    # 刷新失败，尝试使用现有的 token
+                    existing_token = decrypt_credential(credential.api_key) if credential.api_key else None
+                    if existing_token:
+                        print(f"[Token] 刷新失败但存在旧 token，尝试使用旧 token", flush=True)
+                        return existing_token
+                    print(f"[Token] 凭证 {credential.email or credential.id} 无法获取有效 token", flush=True)
+                    return None
+            else:
+                # Token 未过期，直接返回
+                return decrypt_credential(credential.api_key)
         
         # 普通 API Key 直接返回
         return decrypt_credential(credential.api_key)
@@ -771,15 +929,20 @@ class CredentialPool:
         return cd_seconds
     
     @staticmethod
-    async def get_all_credentials(db: AsyncSession):
-        """获取所有凭证"""
-        result = await db.execute(select(Credential).order_by(Credential.created_at.desc()))
+    async def get_all_credentials(db: AsyncSession, mode: str = None):
+        """获取所有凭证（可按类型过滤）"""
+        query = select(Credential)
+        if mode:
+            mode = CredentialPool.validate_mode(mode)
+            query = query.where(Credential.api_type == mode)
+        result = await db.execute(query.order_by(Credential.created_at.desc()))
         return result.scalars().all()
     
     @staticmethod
-    async def add_credential(db: AsyncSession, name: str, api_key: str) -> Credential:
+    async def add_credential(db: AsyncSession, name: str, api_key: str, mode: str = "geminicli") -> Credential:
         """添加凭证"""
-        credential = Credential(name=name, api_key=api_key)
+        mode = CredentialPool.validate_mode(mode)
+        credential = Credential(name=name, api_key=api_key, api_type=mode)
         db.add(credential)
         await db.commit()
         await db.refresh(credential)

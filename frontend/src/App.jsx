@@ -3,6 +3,8 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import api from './api'
 import Announcement from './components/Announcement'
 import Admin from './pages/Admin'
+import AntigravityCredentials from './pages/AntigravityCredentials'
+import AntigravityOAuth from './pages/AntigravityOAuth'
 import Credentials from './pages/Credentials'
 import Dashboard from './pages/Dashboard'
 import ErrorMessages from './pages/ErrorMessages'
@@ -85,6 +87,12 @@ function App() {
           } />
           <Route path="/credentials" element={
             <ProtectedRoute><Credentials /></ProtectedRoute>
+          } />
+          <Route path="/antigravity-credentials" element={
+            <ProtectedRoute><AntigravityCredentials /></ProtectedRoute>
+          } />
+          <Route path="/antigravity-oauth" element={
+            <ProtectedRoute><AntigravityOAuth /></ProtectedRoute>
           } />
           <Route path="/stats" element={
             <ProtectedRoute adminOnly><Stats /></ProtectedRoute>
