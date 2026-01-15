@@ -8,8 +8,8 @@ from app.config import settings
 class AntigravityClient:
     """Antigravity API 客户端 - 使用 Google Antigravity API"""
     
-    # Antigravity User-Agent (与 gcli2api 保持一致)
-    USER_AGENT = "antigravity/1.11.3 windows/amd64"
+    # Antigravity User-Agent (与 gcli2api 保持一致，使用 grpc-node 格式)
+    USER_AGENT = "grpc-node/1.24.11 grpc-c/42.0.0 (linux; chttp2)"
     
     # 官方系统提示词 (Antigravity 要求，否则返回 429)
     # 参考 gcli2api 项目
@@ -450,7 +450,7 @@ class AntigravityClient:
         return contents, system_instruction
     
     def _map_model_name(self, model: str) -> str:
-        """映射模型名称 - 移除自定义前缀"""
+        """映射模型名称 - 移除自定义前缀并处理特殊模型"""
         # 移除 agy- 前缀 (CatieCli 自定义)
         if model.startswith("agy-"):
             model = model[4:]
@@ -461,6 +461,18 @@ class AntigravityClient:
         for prefix in ["假流式/", "流式抗截断/"]:
             if model.startswith(prefix):
                 model = model[len(prefix):]
+        
+        # Antigravity 模型名称映射 (参考 gcli2api)
+        # Claude 模型保持原样
+        # GPT-OSS 模型保持原样  
+        # Gemini 模型保持原样
+        
+        # 移除思维模式后缀 (Antigravity 不支持 thinking 配置)
+        for suffix in ["-maxthinking", "-nothinking", "-thinking"]:
+            if model.endswith(suffix):
+                model = model[:-len(suffix)]
+                break
+        
         return model
     
     def _convert_to_openai_response(self, gemini_response: dict, model: str) -> dict:
