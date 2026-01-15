@@ -113,7 +113,7 @@ class Settings(BaseSettings):
     
     # Antigravity API 反代配置
     antigravity_enabled: bool = True  # 是否启用 Antigravity API 反代
-    antigravity_api_base: str = "https://daily-cloudcode-pa.sandbox.googleapis.com"
+    antigravity_api_base: str = "https://cloudcode-pa.googleapis.com"
     
     # Discord OAuth (可选，用于 Discord 登录/注册)
     discord_client_id: str = ""
