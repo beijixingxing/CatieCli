@@ -98,16 +98,16 @@
 
 ## 🚧 当前工作进度
 
-| 功能 | 后端 | 前端 | 测试 |
-|------|------|------|------|
-| 凭证上传 | ✅ | ✅ | ⚠️ 待测试 |
-| 凭证管理 | ✅ | ✅ | ⚠️ 待测试 |
-| 凭证检测 | ✅ | ✅ | ⚠️ 待测试 |
-| Project ID 刷新 | ✅ | ✅ | ⚠️ 待测试 |
-| 额度查询 | ✅ | ✅ | ⚠️ 待测试 |
-| OAuth 获取凭证 | ✅ | ✅ | ⚠️ 待测试 |
-| API 代理 | ✅ | N/A | ⚠️ 待测试 |
-| Docker 构建 | ✅ | ❌ 需手动构建 | ❌ |
+| 功能            | 后端 | 前端         | 测试     |
+| --------------- | ---- | ------------ | -------- |
+| 凭证上传        | ✅    | ✅            | ⚠️ 待测试 |
+| 凭证管理        | ✅    | ✅            | ⚠️ 待测试 |
+| 凭证检测        | ✅    | ✅            | ⚠️ 待测试 |
+| Project ID 刷新 | ✅    | ✅            | ⚠️ 待测试 |
+| 额度查询        | ✅    | ✅            | ⚠️ 待测试 |
+| OAuth 获取凭证  | ✅    | ✅            | ⚠️ 待测试 |
+| API 代理        | ✅    | N/A          | ⚠️ 待测试 |
+| Docker 构建     | ✅    | ❌ 需手动构建 | ❌        |
 
 ---
 
@@ -165,40 +165,40 @@ level=warning msg="the attribute `version` is obsolete"
 ## 📁 新增/修改的文件列表
 
 ### 新增文件
-| 文件路径 | 说明 |
-|----------|------|
-| `backend/app/services/antigravity_client.py` | Antigravity API 客户端 |
-| `backend/app/routers/antigravity_proxy.py` | Antigravity 代理路由 |
-| `backend/app/routers/antigravity_manage.py` | Antigravity 凭证管理路由 |
-| `backend/app/routers/antigravity_oauth.py` | Antigravity OAuth 路由 |
+| 文件路径                                        | 说明                     |
+| ----------------------------------------------- | ------------------------ |
+| `backend/app/services/antigravity_client.py`    | Antigravity API 客户端   |
+| `backend/app/routers/antigravity_proxy.py`      | Antigravity 代理路由     |
+| `backend/app/routers/antigravity_manage.py`     | Antigravity 凭证管理路由 |
+| `backend/app/routers/antigravity_oauth.py`      | Antigravity OAuth 路由   |
 | `frontend/src/pages/AntigravityCredentials.jsx` | Antigravity 凭证管理页面 |
-| `frontend/src/pages/AntigravityOAuth.jsx` | Antigravity OAuth 页面 |
+| `frontend/src/pages/AntigravityOAuth.jsx`       | Antigravity OAuth 页面   |
 
 ### 修改文件
-| 文件路径 | 修改内容 |
-|----------|----------|
-| `backend/app/config.py` | 新增 Antigravity 配置项 |
-| `backend/app/models/user.py` | Credential 模型新增 api_type 字段 |
-| `backend/app/services/credential_pool.py` | 支持 mode 参数，优化 token 刷新 |
-| `backend/app/main.py` | 注册新路由 |
-| `backend/app/routers/auth.py` | 小调整 |
-| `backend/app/routers/manage.py` | 小调整 |
-| `backend/app/routers/proxy.py` | 小调整 |
-| `frontend/src/App.jsx` | 新增路由配置 |
-| `frontend/src/pages/Dashboard.jsx` | 新增 Antigravity 入口 |
-| `frontend/src/pages/Settings.jsx` | 新增 Antigravity 开关 |
+| 文件路径                                  | 修改内容                          |
+| ----------------------------------------- | --------------------------------- |
+| `backend/app/config.py`                   | 新增 Antigravity 配置项           |
+| `backend/app/models/user.py`              | Credential 模型新增 api_type 字段 |
+| `backend/app/services/credential_pool.py` | 支持 mode 参数，优化 token 刷新   |
+| `backend/app/main.py`                     | 注册新路由                        |
+| `backend/app/routers/auth.py`             | 小调整                            |
+| `backend/app/routers/manage.py`           | 小调整                            |
+| `backend/app/routers/proxy.py`            | 小调整                            |
+| `frontend/src/App.jsx`                    | 新增路由配置                      |
+| `frontend/src/pages/Dashboard.jsx`        | 新增 Antigravity 入口             |
+| `frontend/src/pages/Settings.jsx`         | 新增 Antigravity 开关             |
 
 ---
 
 ## 📝 TODO
 
-- [ ] 手动构建前端并更新静态资源
+- [x] 手动构建前端并更新静态资源 ✅ 2026-01-16
 - [ ] 测试所有 Antigravity 功能
-- [ ] 修复前端额度按钮不显示问题
+- [x] 修复前端额度按钮不显示问题 ✅ 前端已重新构建
 - [ ] 测试 Token 刷新逻辑
 - [ ] 完善错误处理
 - [ ] 添加更多日志输出
-- [ ] 考虑将前端构建集成到 Docker
+- [x] 考虑将前端构建集成到 Docker ✅ 使用多阶段构建
 
 ---
 
