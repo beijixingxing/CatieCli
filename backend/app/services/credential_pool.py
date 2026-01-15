@@ -643,15 +643,21 @@ class CredentialPool:
             print(f"[Token刷新] refresh_token 解密失败", flush=True)
             return None
         
-        # 优先使用凭证自己的 client_id/secret，否则使用系统配置
+        # 优先使用凭证自己的 client_id/secret，否则根据凭证类型选择系统配置
         if credential.client_id and credential.client_secret:
             client_id = decrypt_credential(credential.client_id)
             client_secret = decrypt_credential(credential.client_secret)
             print(f"[Token刷新] 使用凭证自己的 client_id: {client_id[:20]}...", flush=True)
+        elif credential.api_type == "antigravity":
+            # Antigravity 凭证使用专用的 OAuth 配置
+            client_id = settings.antigravity_client_id
+            client_secret = settings.antigravity_client_secret
+            print(f"[Token刷新] 使用 Antigravity 系统 client_id", flush=True)
         else:
+            # GeminiCLI 凭证使用默认的 Google OAuth 配置
             client_id = settings.google_client_id
             client_secret = settings.google_client_secret
-            print(f"[Token刷新] 使用系统配置的 client_id", flush=True)
+            print(f"[Token刷新] 使用 GeminiCLI 系统 client_id", flush=True)
         
         print(f"[Token刷新] 开始刷新 token, refresh_token 前20字符: {refresh_token[:20]}...", flush=True)
         
