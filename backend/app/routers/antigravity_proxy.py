@@ -216,6 +216,13 @@ async def list_models(request: Request, user: User = Depends(get_user_from_api_k
                         models.append({"id": model_id, "object": "model", "owned_by": "google"})
                         models.append({"id": f"假流式/{model_id}", "object": "model", "owned_by": "google"})
                         models.append({"id": f"流式抗截断/{model_id}", "object": "model", "owned_by": "google"})
+                        
+                        # 为图片模型添加 2k 和 4k 分辨率变体
+                        if "image" in model_id.lower() and "2k" not in model_id.lower() and "4k" not in model_id.lower():
+                            models.append({"id": f"{model_id}-2k", "object": "model", "owned_by": "google"})
+                            models.append({"id": f"{model_id}-4k", "object": "model", "owned_by": "google"})
+                            models.append({"id": f"假流式/{model_id}-2k", "object": "model", "owned_by": "google"})
+                            models.append({"id": f"假流式/{model_id}-4k", "object": "model", "owned_by": "google"})
                     return {"object": "list", "data": models}
             except Exception as e:
                 print(f"[Antigravity] 获取动态模型列表失败: {e}", flush=True)
