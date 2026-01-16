@@ -519,10 +519,12 @@ class CredentialPool:
         # 根据模型确定需要的凭证等级
         required_tier = CredentialPool.get_required_tier(model) if model else "2.5"
         
-        if required_tier == "3":
+        # Antigravity 模式不检查 model_tier（权限由 Google API 控制）
+        # GeminiCLI 模式才需要检查
+        if mode == "geminicli" and required_tier == "3":
             # gemini-3 模型只能用 3 等级凭证
             query = query.where(Credential.model_tier == "3")
-        # 2.5 模型可以用任何等级凭证（不添加额外筛选）
+        # Antigravity 模式或者 2.5 模型可以用任何等级凭证（不添加额外筛选）
         
         # 根据模式决定凭证访问规则
         if pool_mode == "private":
