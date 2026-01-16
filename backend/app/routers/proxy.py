@@ -204,8 +204,8 @@ async def list_models(request: Request, user: User = Depends(get_user_from_api_k
     """列出可用模型 (OpenAI兼容) - 同时包含 GeminiCLI 和 Antigravity 模型
     
     模型命名规则：
-    - GeminiCLI: 无前缀（向后兼容）或 gcli- 前缀，支持思考/搜索后缀
-    - Antigravity: agy- 前缀，只支持流式前缀，无思考/搜索后缀
+    - GeminiCLI: gcli- 前缀，支持思考/搜索后缀和流式前缀
+    - Antigravity: agy- 前缀，支持流式前缀
     """
     from app.models.user import Credential
     from sqlalchemy import or_
@@ -243,27 +243,16 @@ async def list_models(request: Request, user: User = Depends(get_user_from_api_k
     
     models = []
     
-    # === GeminiCLI 模型（无前缀向后兼容 + gcli- 前缀）===
+    # === GeminiCLI 模型（仅 gcli- 前缀）===
     cli_base_models = base_models.copy()
     if has_cli_tier3:
         cli_base_models.extend(tier3_models)
     
     for base in cli_base_models:
-        # 不带前缀的基础模型（向后兼容）
-        models.append({"id": base, "object": "model", "owned_by": "google"})
-        models.append({"id": f"假流式/{base}", "object": "model", "owned_by": "google"})
-        models.append({"id": f"流式抗截断/{base}", "object": "model", "owned_by": "google"})
-        
-        # 带 gcli- 前缀的模型
+        # 带 gcli- 前缀的基础模型
         models.append({"id": f"gcli-{base}", "object": "model", "owned_by": "google"})
         models.append({"id": f"假流式/gcli-{base}", "object": "model", "owned_by": "google"})
         models.append({"id": f"流式抗截断/gcli-{base}", "object": "model", "owned_by": "google"})
-        
-        # thinking 变体（无前缀）
-        for suffix in thinking_suffixes:
-            models.append({"id": f"{base}{suffix}", "object": "model", "owned_by": "google"})
-            models.append({"id": f"假流式/{base}{suffix}", "object": "model", "owned_by": "google"})
-            models.append({"id": f"流式抗截断/{base}{suffix}", "object": "model", "owned_by": "google"})
         
         # thinking 变体（gcli- 前缀）
         for suffix in thinking_suffixes:
@@ -271,22 +260,10 @@ async def list_models(request: Request, user: User = Depends(get_user_from_api_k
             models.append({"id": f"假流式/gcli-{base}{suffix}", "object": "model", "owned_by": "google"})
             models.append({"id": f"流式抗截断/gcli-{base}{suffix}", "object": "model", "owned_by": "google"})
         
-        # search 变体（无前缀）
-        models.append({"id": f"{base}{search_suffix}", "object": "model", "owned_by": "google"})
-        models.append({"id": f"假流式/{base}{search_suffix}", "object": "model", "owned_by": "google"})
-        models.append({"id": f"流式抗截断/{base}{search_suffix}", "object": "model", "owned_by": "google"})
-        
         # search 变体（gcli- 前缀）
         models.append({"id": f"gcli-{base}{search_suffix}", "object": "model", "owned_by": "google"})
         models.append({"id": f"假流式/gcli-{base}{search_suffix}", "object": "model", "owned_by": "google"})
         models.append({"id": f"流式抗截断/gcli-{base}{search_suffix}", "object": "model", "owned_by": "google"})
-        
-        # thinking + search 组合（无前缀）
-        for suffix in thinking_suffixes:
-            combined = f"{suffix}{search_suffix}"
-            models.append({"id": f"{base}{combined}", "object": "model", "owned_by": "google"})
-            models.append({"id": f"假流式/{base}{combined}", "object": "model", "owned_by": "google"})
-            models.append({"id": f"流式抗截断/{base}{combined}", "object": "model", "owned_by": "google"})
         
         # thinking + search 组合（gcli- 前缀）
         for suffix in thinking_suffixes:
@@ -294,10 +271,6 @@ async def list_models(request: Request, user: User = Depends(get_user_from_api_k
             models.append({"id": f"gcli-{base}{combined}", "object": "model", "owned_by": "google"})
             models.append({"id": f"假流式/gcli-{base}{combined}", "object": "model", "owned_by": "google"})
             models.append({"id": f"流式抗截断/gcli-{base}{combined}", "object": "model", "owned_by": "google"})
-    
-    # Image 模型
-    models.append({"id": "gemini-2.5-flash-image", "object": "model", "owned_by": "google"})
-    models.append({"id": "gcli-gemini-2.5-flash-image", "object": "model", "owned_by": "google"})
     
     # === Antigravity 模型（agy- 前缀，从 API 动态获取，无流式前缀和思考/搜索后缀）===
     if has_antigravity and settings.antigravity_enabled:
