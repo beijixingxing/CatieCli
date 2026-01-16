@@ -108,13 +108,16 @@ async def normalize_gemini_request(
             # 图片生成模型特殊处理
             if "2k" in model.lower():
                 result["model"] = "gemini-3-pro-image-2k"
+                image_config = {"outputWidth": 2048, "outputHeight": 2048}
             elif "4k" in model.lower():
                 result["model"] = "gemini-3-pro-image-4k"
+                image_config = {"outputWidth": 4096, "outputHeight": 4096}
             else:
                 result["model"] = "gemini-3-pro-image"
+                image_config = {}  # 默认分辨率
             result["generationConfig"] = {
                 "candidateCount": 1,
-                "imageConfig": {}
+                "imageConfig": image_config
             }
             for key in ("systemInstruction", "tools", "toolConfig"):
                 result.pop(key, None)
