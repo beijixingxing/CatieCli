@@ -703,7 +703,9 @@ class AntigravityClient:
         if "candidates" in response_data and response_data["candidates"]:
             candidate = response_data["candidates"][0]
             if "content" in candidate and "parts" in candidate["content"]:
-                for part in candidate["content"]["parts"]:
+                parts = candidate["content"]["parts"]
+                print(f"[AntigravityClient] 响应 parts 数量: {len(parts)}, 类型: {[list(p.keys()) for p in parts]}", flush=True)
+                for part in parts:
                     # 处理文本
                     if "text" in part:
                         text = part.get("text", "")
