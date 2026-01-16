@@ -326,15 +326,19 @@ async def list_models(request: Request, user: User = Depends(get_user_from_api_k
                         if variant not in existing_ids:
                             models.append({"id": variant, "object": "model", "owned_by": "google"})
                     
-                    # 强制添加不带 -thinking 后缀的 Claude 基础模型
-                    claude_base_models = [
-                        "agy-claude-opus-4-5", "agy-claude-sonnet-4-5"
+                    # 强制添加不带 -thinking 后缀的 Claude 基础模型和 -search 变体
+                    claude_model_variants = [
+                        # 基础模型（不带后缀）
+                        "agy-claude-opus-4-5", "agy-claude-sonnet-4-5",
+                        # 联网搜索变体
+                        "agy-claude-opus-4-5-search", "agy-claude-sonnet-4-5-search",
+                        "agy-claude-opus-4-5-thinking-search", "agy-claude-sonnet-4-5-thinking-search",
                     ]
                     existing_ids = {m["id"] for m in models}
-                    for base_model in claude_base_models:
-                        if base_model not in existing_ids:
-                            models.append({"id": base_model, "object": "model", "owned_by": "google"})
-                            print(f"[Models] ✅ 强制添加 Claude 基础模型: {base_model}", flush=True)
+                    for variant in claude_model_variants:
+                        if variant not in existing_ids:
+                            models.append({"id": variant, "object": "model", "owned_by": "google"})
+                            print(f"[Models] ✅ 强制添加 Claude 模型变体: {variant}", flush=True)
         except Exception as e:
             print(f"[Models] 获取 Antigravity 模型列表失败: {e}", flush=True)
             # 降级：使用静态模型列表
