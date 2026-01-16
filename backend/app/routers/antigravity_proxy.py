@@ -228,6 +228,17 @@ async def list_models(request: Request, user: User = Depends(get_user_from_api_k
                             if not model_id.startswith("agy-"):
                                 models.append({"id": f"agy-{model_id}-2k", "object": "model", "owned_by": "google"})
                                 models.append({"id": f"agy-{model_id}-4k", "object": "model", "owned_by": "google"})
+                    
+                    # 强制添加图片模型的 2k/4k 变体（确保它们始终存在）
+                    image_variants = [
+                        "agy-gemini-3-pro-image-2k", "agy-gemini-3-pro-image-4k",
+                        "gemini-3-pro-image-2k", "gemini-3-pro-image-4k",
+                    ]
+                    existing_ids = {m["id"] for m in models}
+                    for variant in image_variants:
+                        if variant not in existing_ids:
+                            models.append({"id": variant, "object": "model", "owned_by": "google"})
+                    
                     return {"object": "list", "data": models}
             except Exception as e:
                 print(f"[Antigravity] 获取动态模型列表失败: {e}", flush=True)
