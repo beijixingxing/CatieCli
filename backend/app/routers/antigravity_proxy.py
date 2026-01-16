@@ -238,6 +238,11 @@ async def list_models(request: Request, user: User = Depends(get_user_from_api_k
                     for variant in image_variants:
                         if variant not in existing_ids:
                             models.append({"id": variant, "object": "model", "owned_by": "google"})
+                            print(f"[Antigravity] ✅ 强制添加图片模型变体: {variant}", flush=True)
+                    
+                    # 调试：打印所有图片相关模型
+                    image_models = [m["id"] for m in models if "image" in m["id"].lower()]
+                    print(f"[Antigravity] 📷 图片模型列表: {image_models}", flush=True)
                     
                     return {"object": "list", "data": models}
             except Exception as e:
