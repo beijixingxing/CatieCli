@@ -207,12 +207,32 @@ async def list_models(request: Request, user: User = Depends(get_user_from_api_k
                 dynamic_models = await client.fetch_available_models()
                 if dynamic_models:
                     print(f"[Antigravity] 🔍 动态模型数量: {len(dynamic_models)}", flush=True)
-                    # 添加假流式和抗截断变体 (过滤掉 2.5 模型)
+                    
+                    # 过滤掉不需要的测试/内部模型
+                    # 只保留标准的 gemini, claude, gpt 模型
+                    def is_valid_model(model_id: str) -> bool:
+                        model_lower = model_id.lower()
+                        # 排除条件：包含这些关键字的跳过
+                        invalid_patterns = [
+                            "chat_", "rev", "tab_", "uic", "test", "exp", "lite_preview",
+                            "2.5", "gemini-2", "gcli-"
+                        ]
+                        for pattern in invalid_patterns:
+                            if pattern in model_lower:
+                                return False
+                        # 允许条件：必须是 gemini, claude, gpt 开头的模型
+                        valid_prefixes = ["gemini-3", "claude", "gpt-oss", "agy-gemini-3", "agy-claude", "agy-gpt"]
+                        for prefix in valid_prefixes:
+                            if model_lower.startswith(prefix):
+                                return True
+                        return False
+                    
+                    # 添加假流式和抗截断变体
                     models = []
                     for m in dynamic_models:
                         model_id = m.get("id", "")
-                        # 跳过 2.5 模型
-                        if "2.5" in model_id or "gemini-2" in model_id.lower():
+                        # 过滤无效模型
+                        if not is_valid_model(model_id):
                             continue
                         models.append({"id": model_id, "object": "model", "owned_by": "google"})
                         models.append({"id": f"假流式/{model_id}", "object": "model", "owned_by": "google"})
