@@ -121,7 +121,6 @@ async def upload_antigravity_credentials(
             is_valid = False
             project_id = cred_data.get("project_id", "")
             verify_msg = ""
-            detected_tier = "2.5"  # 默认 2.5，验证成功后可能更新为 3
             
             try:
                 import httpx
@@ -167,24 +166,7 @@ async def upload_antigravity_credentials(
                             if resp.status_code in [200, 429]:
                                 is_valid = True
                                 verify_msg = f"✅ 有效 (project: {project_id[:20]}...)"
-                                
-                                # 自动检测 3.0 权限
-                                try:
-                                    from app.services.antigravity_client import AntigravityClient
-                                    temp_client = AntigravityClient(access_token, project_id)
-                                    quota_result = await temp_client.fetch_quota_info()
-                                    if quota_result.get("success"):
-                                        models = quota_result.get("models", {})
-                                        # 检查是否有 3.0 模型
-                                        has_3_0 = any("3.0" in model_id or "gemini-3" in model_id.lower() for model_id in models.keys())
-                                        if has_3_0:
-                                            detected_tier = "3"
-                                            verify_msg += " [3.0✅]"
-                                        else:
-                                            detected_tier = "2.5"
-                                except Exception as tier_err:
-                                    print(f"[Antigravity上传] 检测等级失败: {tier_err}", flush=True)
-                                    detected_tier = "2.5"
+                                # Antigravity 全部是 3.0 模型，无需检测
                             else:
                                 verify_msg = f"❌ API测试失败 ({resp.status_code})"
                     else:
@@ -210,7 +192,7 @@ async def upload_antigravity_credentials(
                 is_public=actual_public,
                 is_active=is_valid,
                 api_type=MODE,  # 标记为 Antigravity 凭证
-                model_tier=detected_tier if is_valid else "2.5"  # 自动检测的等级
+                model_tier="3"  # Antigravity 全是 3.0 模型
             )
             db.add(credential)
             
