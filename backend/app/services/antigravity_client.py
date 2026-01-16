@@ -324,6 +324,9 @@ class AntigravityClient:
                     models = []
                     if 'models' in data and isinstance(data['models'], dict):
                         for model_id in data['models'].keys():
+                            # 过滤掉 2.5 模型
+                            if "2.5" in model_id or "gemini-2" in model_id.lower():
+                                continue
                             models.append({
                                 "id": model_id,
                                 "object": "model",
