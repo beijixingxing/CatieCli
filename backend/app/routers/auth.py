@@ -398,152 +398,166 @@ async def upload_credentials(
     # 处理所有JSON文件
     for filename, content in json_files:
         try:
-            cred_data = json.loads(content.decode('utf-8') if isinstance(content, bytes) else content)
+            parsed_data = json.loads(content.decode('utf-8') if isinstance(content, bytes) else content)
             
-            # 验证必要字段
-            required_fields = ["refresh_token"]
-            missing = [f for f in required_fields if f not in cred_data]
-            if missing:
-                results.append({"filename": filename, "status": "error", "message": f"缺少字段: {', '.join(missing)}"})
-                continue
+            # 支持两种格式：
+            # 1. 单个凭证对象: {"email": "...", "refresh_token": "..."}
+            # 2. 凭证数组: [{"email": "...", "refresh_token": "..."}, ...]
+            if isinstance(parsed_data, list):
+                # 数组格式：多个凭证
+                cred_list = parsed_data
+                results.append({"filename": filename, "status": "info", "message": f"检测到数组格式，包含 {len(cred_list)} 个凭证"})
+            else:
+                # 单个凭证对象
+                cred_list = [parsed_data]
             
-            # 创建凭证（加密存储）
-            email = cred_data.get("email") or filename
-            project_id = cred_data.get("project_id", "")
-            refresh_token = cred_data.get("refresh_token")
-            
-            # 去重检查：根据 email 或 refresh_token 判断是否已存在（仅在 GeminiCLI 凭证中）
-            from sqlalchemy import or_
-            existing = await db.execute(
-                select(Credential)
-                .where(Credential.email == email)
-                .where(or_(
-                    Credential.api_type == "geminicli",
-                    Credential.api_type == None,
-                    Credential.api_type == ""
-                ))
-            )
-            if existing.scalar_one_or_none():
-                results.append({"filename": filename, "status": "skip", "message": f"凭证已存在: {email}"})
-                continue
-            
-            # 也检查 refresh_token 是否重复（仅在 GeminiCLI 凭证中）
-            from app.services.crypto import encrypt_credential as enc
-            existing_token = await db.execute(
-                select(Credential)
-                .where(Credential.refresh_token == enc(refresh_token))
-                .where(or_(
-                    Credential.api_type == "geminicli",
-                    Credential.api_type == None,
-                    Credential.api_type == ""
-                ))
-            )
-            if existing_token.scalar_one_or_none():
-                results.append({"filename": filename, "status": "skip", "message": f"凭证token已存在: {email}"})
-                continue
-            
-            # 自动验证凭证有效性
-            is_valid = False
-            model_tier = "2.5"
-            verify_msg = ""
-            
-            try:
-                import httpx
-                from app.services.credential_pool import CredentialPool
+            for idx, cred_data in enumerate(cred_list):
+                item_name = f"{filename}[{idx}]" if len(cred_list) > 1 else filename
                 
-                # 创建临时凭证对象用于获取 token
-                temp_cred = Credential(
+                # 验证必要字段
+                required_fields = ["refresh_token"]
+                missing = [f for f in required_fields if f not in cred_data]
+                if missing:
+                    results.append({"filename": item_name, "status": "error", "message": f"缺少字段: {', '.join(missing)}"})
+                    continue
+                
+                # 创建凭证（加密存储）
+                email = cred_data.get("email") or item_name
+                project_id = cred_data.get("project_id", "")
+                refresh_token = cred_data.get("refresh_token")
+            
+                # 去重检查：根据 email 或 refresh_token 判断是否已存在（仅在 GeminiCLI 凭证中）
+                from sqlalchemy import or_
+                existing = await db.execute(
+                    select(Credential)
+                    .where(Credential.email == email)
+                    .where(or_(
+                        Credential.api_type == "geminicli",
+                        Credential.api_type == None,
+                        Credential.api_type == ""
+                    ))
+                )
+                if existing.scalar_one_or_none():
+                    results.append({"filename": item_name, "status": "skip", "message": f"凭证已存在: {email}"})
+                    continue
+            
+                # 也检查 refresh_token 是否重复（仅在 GeminiCLI 凭证中）
+                from app.services.crypto import encrypt_credential as enc
+                existing_token = await db.execute(
+                    select(Credential)
+                    .where(Credential.refresh_token == enc(refresh_token))
+                    .where(or_(
+                        Credential.api_type == "geminicli",
+                        Credential.api_type == None,
+                        Credential.api_type == ""
+                    ))
+                )
+                if existing_token.scalar_one_or_none():
+                    results.append({"filename": item_name, "status": "skip", "message": f"凭证token已存在: {email}"})
+                    continue
+            
+                # 自动验证凭证有效性
+                is_valid = False
+                model_tier = "2.5"
+                verify_msg = ""
+            
+                try:
+                    import httpx
+                    from app.services.credential_pool import CredentialPool
+                
+                    # 创建临时凭证对象用于获取 token
+                    temp_cred = Credential(
+                        api_key=encrypt_credential(cred_data.get("token") or cred_data.get("access_token", "")),
+                        refresh_token=encrypt_credential(cred_data.get("refresh_token")),
+                        client_id=encrypt_credential(cred_data.get("client_id")) if cred_data.get("client_id") else None,
+                        client_secret=encrypt_credential(cred_data.get("client_secret")) if cred_data.get("client_secret") else None,
+                        credential_type="oauth"
+                    )
+                
+                    access_token = await CredentialPool.get_access_token(temp_cred, db)
+                    if access_token:
+                        async with httpx.AsyncClient(timeout=15) as client:
+                            # 使用 cloudcode-pa 端点测试（与 gcli2api 一致）
+                            test_url = "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
+                            headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+                        
+                            # 先测试 2.5 判断凭证是否有效
+                            test_payload_25 = {
+                                "model": "gemini-2.5-flash",
+                                "project": project_id,
+                                "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
+                            }
+                            resp = await client.post(test_url, headers=headers, json=test_payload_25)
+                        
+                            if resp.status_code == 200 or resp.status_code == 429:
+                                is_valid = True
+                                model_tier = "2.5"
+                            
+                                # 凭证有效，再测试 3.0
+                                test_payload_3 = {
+                                    "model": "gemini-3-pro-preview",
+                                    "project": project_id,
+                                    "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
+                                }
+                                resp3 = await client.post(test_url, headers=headers, json=test_payload_3)
+                            
+                                if resp3.status_code == 200 or resp3.status_code == 429:
+                                    model_tier = "3"
+                                    verify_msg = f"✅ 有效 (等级: 3)"
+                                else:
+                                    verify_msg = f"✅ 有效 (等级: 2.5)"
+                            else:
+                                verify_msg = f"❌ 无效 ({resp.status_code})"
+                    else:
+                        verify_msg = "❌ 无法获取 token"
+                except Exception as e:
+                    verify_msg = f"⚠️ 验证失败: {str(e)[:30]}"
+            
+                # 如果要捐赠但凭证无效，不允许
+                actual_public = is_public and is_valid
+            
+                credential = Credential(
+                    user_id=user.id,
+                    name=f"Upload - {email}",
                     api_key=encrypt_credential(cred_data.get("token") or cred_data.get("access_token", "")),
                     refresh_token=encrypt_credential(cred_data.get("refresh_token")),
                     client_id=encrypt_credential(cred_data.get("client_id")) if cred_data.get("client_id") else None,
                     client_secret=encrypt_credential(cred_data.get("client_secret")) if cred_data.get("client_secret") else None,
-                    credential_type="oauth"
+                    project_id=project_id,
+                    credential_type="oauth",
+                    email=email,
+                    is_public=actual_public,
+                    is_active=is_valid,
+                    model_tier=model_tier,
+                    api_type="geminicli"  # 明确设置为 GeminiCLI 凭证
                 )
-                
-                access_token = await CredentialPool.get_access_token(temp_cred, db)
-                if access_token:
-                    async with httpx.AsyncClient(timeout=15) as client:
-                        # 使用 cloudcode-pa 端点测试（与 gcli2api 一致）
-                        test_url = "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
-                        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-                        
-                        # 先测试 2.5 判断凭证是否有效
-                        test_payload_25 = {
-                            "model": "gemini-2.5-flash",
-                            "project": project_id,
-                            "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
-                        }
-                        resp = await client.post(test_url, headers=headers, json=test_payload_25)
-                        
-                        if resp.status_code == 200 or resp.status_code == 429:
-                            is_valid = True
-                            model_tier = "2.5"
-                            
-                            # 凭证有效，再测试 3.0
-                            test_payload_3 = {
-                                "model": "gemini-3-pro-preview",
-                                "project": project_id,
-                                "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
-                            }
-                            resp3 = await client.post(test_url, headers=headers, json=test_payload_3)
-                            
-                            if resp3.status_code == 200 or resp3.status_code == 429:
-                                model_tier = "3"
-                                verify_msg = f"✅ 有效 (等级: 3)"
-                            else:
-                                verify_msg = f"✅ 有效 (等级: 2.5)"
-                        else:
-                            verify_msg = f"❌ 无效 ({resp.status_code})"
-                else:
-                    verify_msg = "❌ 无法获取 token"
-            except Exception as e:
-                verify_msg = f"⚠️ 验证失败: {str(e)[:30]}"
+                db.add(credential)
             
-            # 如果要捐赠但凭证无效，不允许
-            actual_public = is_public and is_valid
+                # 如果是公开且有效的凭证，根据凭证等级增加额度奖励
+                # 2.5凭证 = quota_flash + quota_25pro
+                # 3.0凭证 = quota_flash + quota_25pro + quota_30pro
+                if actual_public and is_valid:
+                    # 使用管理员配置的分类额度计算奖励（与前端显示一致）
+                    if model_tier == "3":
+                        reward = settings.quota_flash + settings.quota_25pro + settings.quota_30pro
+                    else:
+                        reward = settings.quota_flash + settings.quota_25pro
+                    user.daily_quota += reward
+                    print(f"[上传凭证] 用户 {user.username} 获得 {reward} 额度奖励 (等级: {model_tier})", flush=True)
             
-            credential = Credential(
-                user_id=user.id,
-                name=f"Upload - {email}",
-                api_key=encrypt_credential(cred_data.get("token") or cred_data.get("access_token", "")),
-                refresh_token=encrypt_credential(cred_data.get("refresh_token")),
-                client_id=encrypt_credential(cred_data.get("client_id")) if cred_data.get("client_id") else None,
-                client_secret=encrypt_credential(cred_data.get("client_secret")) if cred_data.get("client_secret") else None,
-                project_id=project_id,
-                credential_type="oauth",
-                email=email,
-                is_public=actual_public,
-                is_active=is_valid,
-                model_tier=model_tier,
-                api_type="geminicli"  # 明确设置为 GeminiCLI 凭证
-            )
-            db.add(credential)
+                status_msg = f"上传成功 {verify_msg}"
+                if is_public and not is_valid:
+                    status_msg += " (无效凭证不会上传到公共池)"
+                results.append({"filename": item_name, "status": "success" if is_valid else "warning", "message": status_msg})
+                success_count += 1
             
-            # 如果是公开且有效的凭证，根据凭证等级增加额度奖励
-            # 2.5凭证 = quota_flash + quota_25pro
-            # 3.0凭证 = quota_flash + quota_25pro + quota_30pro
-            if actual_public and is_valid:
-                # 使用管理员配置的分类额度计算奖励（与前端显示一致）
-                if model_tier == "3":
-                    reward = settings.quota_flash + settings.quota_25pro + settings.quota_30pro
-                else:
-                    reward = settings.quota_flash + settings.quota_25pro
-                user.daily_quota += reward
-                print(f"[上传凭证] 用户 {user.username} 获得 {reward} 额度奖励 (等级: {model_tier})", flush=True)
-            
-            status_msg = f"上传成功 {verify_msg}"
-            if is_public and not is_valid:
-                status_msg += " (无效凭证不会上传到公共池)"
-            results.append({"filename": filename, "status": "success" if is_valid else "warning", "message": status_msg})
-            success_count += 1
-            
-            # 每50个凭证提交一次，避免大事务超时
-            if success_count % 50 == 0:
-                try:
-                    await db.commit()
-                    print(f"[批量上传] 已提交 {success_count} 个凭证", flush=True)
-                except Exception as commit_err:
-                    print(f"[批量上传] 提交失败: {commit_err}", flush=True)
+                # 每50个凭证提交一次，避免大事务超时
+                if success_count % 50 == 0:
+                    try:
+                        await db.commit()
+                        print(f"[批量上传] 已提交 {success_count} 个凭证", flush=True)
+                    except Exception as commit_err:
+                        print(f"[批量上传] 提交失败: {commit_err}", flush=True)
             
         except json.JSONDecodeError:
             results.append({"filename": filename, "status": "error", "message": "JSON 格式错误"})
