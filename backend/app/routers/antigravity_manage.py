@@ -83,136 +83,150 @@ async def upload_antigravity_credentials(
     # 处理所有JSON文件
     for filename, content in json_files:
         try:
-            cred_data = json.loads(content.decode('utf-8') if isinstance(content, bytes) else content)
+            parsed_data = json.loads(content.decode('utf-8') if isinstance(content, bytes) else content)
             
-            # 验证必要字段
-            required_fields = ["refresh_token"]
-            missing = [f for f in required_fields if f not in cred_data]
-            if missing:
-                results.append({"filename": filename, "status": "error", "message": f"缺少字段: {', '.join(missing)}"})
-                continue
+            # 支持两种格式：
+            # 1. 单个凭证对象: {"email": "...", "refresh_token": "..."}
+            # 2. 凭证数组: [{"email": "...", "refresh_token": "..."}, ...]
+            if isinstance(parsed_data, list):
+                # 数组格式：多个凭证
+                cred_list = parsed_data
+                results.append({"filename": filename, "status": "info", "message": f"检测到数组格式，包含 {len(cred_list)} 个凭证"})
+            else:
+                # 单个凭证对象
+                cred_list = [parsed_data]
             
-            # 创建凭证（加密存储）
-            email = cred_data.get("email") or filename
-            refresh_token = cred_data.get("refresh_token")
-            
-            # 去重检查：根据 email 判断是否已存在（仅在 antigravity 凭证中）
-            existing = await db.execute(
-                select(Credential)
-                .where(Credential.email == email)
-                .where(Credential.api_type == MODE)
-            )
-            if existing.scalar_one_or_none():
-                results.append({"filename": filename, "status": "skip", "message": f"凭证已存在: {email}"})
-                continue
-            
-            # 也检查 refresh_token 是否重复
-            encrypted_token = encrypt_credential(refresh_token)
-            existing_token = await db.execute(
-                select(Credential)
-                .where(Credential.refresh_token == encrypted_token)
-                .where(Credential.api_type == MODE)
-            )
-            if existing_token.scalar_one_or_none():
-                results.append({"filename": filename, "status": "skip", "message": f"凭证token已存在: {email}"})
-                continue
-            
-            # 获取 access_token 并验证
-            is_valid = False
-            project_id = cred_data.get("project_id", "")
-            verify_msg = ""
-            
-            try:
-                import httpx
+            for idx, cred_data in enumerate(cred_list):
+                item_name = f"{filename}[{idx}]" if len(cred_list) > 1 else filename
                 
-                # 创建临时凭证对象用于获取 token
-                temp_cred = Credential(
+                # 验证必要字段
+                required_fields = ["refresh_token"]
+                missing = [f for f in required_fields if f not in cred_data]
+                if missing:
+                    results.append({"filename": item_name, "status": "error", "message": f"缺少字段: {', '.join(missing)}"})
+                    continue
+                
+                # 创建凭证（加密存储）
+                email = cred_data.get("email") or item_name
+                refresh_token = cred_data.get("refresh_token")
+                
+                # 去重检查：根据 email 判断是否已存在（仅在 antigravity 凭证中）
+                existing = await db.execute(
+                    select(Credential)
+                    .where(Credential.email == email)
+                    .where(Credential.api_type == MODE)
+                )
+                if existing.scalar_one_or_none():
+                    results.append({"filename": item_name, "status": "skip", "message": f"凭证已存在: {email}"})
+                    continue
+                
+                # 也检查 refresh_token 是否重复
+                encrypted_token = encrypt_credential(refresh_token)
+                existing_token = await db.execute(
+                    select(Credential)
+                    .where(Credential.refresh_token == encrypted_token)
+                    .where(Credential.api_type == MODE)
+                )
+                if existing_token.scalar_one_or_none():
+                    results.append({"filename": item_name, "status": "skip", "message": f"凭证token已存在: {email}"})
+                    continue
+            
+                # 获取 access_token 并验证
+                is_valid = False
+                project_id = cred_data.get("project_id", "")
+                verify_msg = ""
+            
+                try:
+                    import httpx
+                
+                    # 创建临时凭证对象用于获取 token
+                    temp_cred = Credential(
+                        api_key=encrypt_credential(cred_data.get("token") or cred_data.get("access_token", "")),
+                        refresh_token=encrypt_credential(refresh_token),
+                        client_id=encrypt_credential(cred_data.get("client_id")) if cred_data.get("client_id") else None,
+                        client_secret=encrypt_credential(cred_data.get("client_secret")) if cred_data.get("client_secret") else None,
+                        credential_type="oauth"
+                    )
+                
+                    access_token = await CredentialPool.get_access_token(temp_cred, db)
+                    if access_token:
+                        # 如果没有 project_id，使用 Antigravity 方式获取
+                        if not project_id:
+                            print(f"[Antigravity上传] 正在获取 project_id: {email}", flush=True)
+                            project_id = await fetch_project_id(
+                                access_token=access_token,
+                                user_agent=ANTIGRAVITY_USER_AGENT,
+                                api_base_url=settings.antigravity_api_base
+                            )
+                            if project_id:
+                                print(f"[Antigravity上传] 获取到 project_id: {project_id}", flush=True)
+                    
+                        # 测试 API 是否可用
+                        if project_id:
+                            async with httpx.AsyncClient(timeout=15) as client:
+                                test_url = f"{settings.antigravity_api_base}/v1internal:generateContent"
+                                headers = {
+                                    "Authorization": f"Bearer {access_token}", 
+                                    "Content-Type": "application/json",
+                                    "User-Agent": ANTIGRAVITY_USER_AGENT
+                                }
+                                test_payload = {
+                                    "model": "gemini-2.5-flash",
+                                    "project": project_id,
+                                    "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
+                                }
+                                resp = await client.post(test_url, headers=headers, json=test_payload)
+                            
+                                if resp.status_code in [200, 429]:
+                                    is_valid = True
+                                    verify_msg = f"✅ 有效 (project: {project_id[:20]}...)"
+                                    # Antigravity 全部是 3.0 模型，无需检测
+                                else:
+                                    verify_msg = f"❌ API测试失败 ({resp.status_code})"
+                        else:
+                            verify_msg = "❌ 无法获取 project_id"
+                    else:
+                        verify_msg = "❌ 无法获取 access_token"
+                except Exception as e:
+                    verify_msg = f"⚠️ 验证失败: {str(e)[:30]}"
+            
+                # 如果要捐赠但凭证无效，不允许
+                actual_public = is_public and is_valid
+            
+                credential = Credential(
+                    user_id=user.id,
+                    name=f"Antigravity - {email}",
                     api_key=encrypt_credential(cred_data.get("token") or cred_data.get("access_token", "")),
                     refresh_token=encrypt_credential(refresh_token),
                     client_id=encrypt_credential(cred_data.get("client_id")) if cred_data.get("client_id") else None,
                     client_secret=encrypt_credential(cred_data.get("client_secret")) if cred_data.get("client_secret") else None,
-                    credential_type="oauth"
+                    project_id=project_id,
+                    credential_type="oauth",
+                    email=email,
+                    is_public=actual_public,
+                    is_active=is_valid,
+                    api_type=MODE,  # 标记为 Antigravity 凭证
+                    model_tier="3"  # Antigravity 全是 3.0 模型
                 )
-                
-                access_token = await CredentialPool.get_access_token(temp_cred, db)
-                if access_token:
-                    # 如果没有 project_id，使用 Antigravity 方式获取
-                    if not project_id:
-                        print(f"[Antigravity上传] 正在获取 project_id: {email}", flush=True)
-                        project_id = await fetch_project_id(
-                            access_token=access_token,
-                            user_agent=ANTIGRAVITY_USER_AGENT,
-                            api_base_url=settings.antigravity_api_base
-                        )
-                        if project_id:
-                            print(f"[Antigravity上传] 获取到 project_id: {project_id}", flush=True)
-                    
-                    # 测试 API 是否可用
-                    if project_id:
-                        async with httpx.AsyncClient(timeout=15) as client:
-                            test_url = f"{settings.antigravity_api_base}/v1internal:generateContent"
-                            headers = {
-                                "Authorization": f"Bearer {access_token}", 
-                                "Content-Type": "application/json",
-                                "User-Agent": ANTIGRAVITY_USER_AGENT
-                            }
-                            test_payload = {
-                                "model": "gemini-2.5-flash",
-                                "project": project_id,
-                                "request": {"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}
-                            }
-                            resp = await client.post(test_url, headers=headers, json=test_payload)
-                            
-                            if resp.status_code in [200, 429]:
-                                is_valid = True
-                                verify_msg = f"✅ 有效 (project: {project_id[:20]}...)"
-                                # Antigravity 全部是 3.0 模型，无需检测
-                            else:
-                                verify_msg = f"❌ API测试失败 ({resp.status_code})"
-                    else:
-                        verify_msg = "❌ 无法获取 project_id"
-                else:
-                    verify_msg = "❌ 无法获取 access_token"
-            except Exception as e:
-                verify_msg = f"⚠️ 验证失败: {str(e)[:30]}"
+                db.add(credential)
             
-            # 如果要捐赠但凭证无效，不允许
-            actual_public = is_public and is_valid
+                status_msg = f"上传成功 {verify_msg}"
+                if is_public and not is_valid:
+                    status_msg += " (无效凭证不会上传到公共池)"
+                results.append({
+                    "filename": item_name, 
+                    "status": "success" if is_valid else "warning", 
+                    "message": status_msg
+                })
+                success_count += 1
             
-            credential = Credential(
-                user_id=user.id,
-                name=f"Antigravity - {email}",
-                api_key=encrypt_credential(cred_data.get("token") or cred_data.get("access_token", "")),
-                refresh_token=encrypt_credential(refresh_token),
-                client_id=encrypt_credential(cred_data.get("client_id")) if cred_data.get("client_id") else None,
-                client_secret=encrypt_credential(cred_data.get("client_secret")) if cred_data.get("client_secret") else None,
-                project_id=project_id,
-                credential_type="oauth",
-                email=email,
-                is_public=actual_public,
-                is_active=is_valid,
-                api_type=MODE,  # 标记为 Antigravity 凭证
-                model_tier="3"  # Antigravity 全是 3.0 模型
-            )
-            db.add(credential)
-            
-            status_msg = f"上传成功 {verify_msg}"
-            if is_public and not is_valid:
-                status_msg += " (无效凭证不会上传到公共池)"
-            results.append({
-                "filename": filename, 
-                "status": "success" if is_valid else "warning", 
-                "message": status_msg
-            })
-            success_count += 1
-            
-            # 每50个凭证提交一次
-            if success_count % 50 == 0:
-                try:
-                    await db.commit()
-                    print(f"[Antigravity批量上传] 已提交 {success_count} 个凭证", flush=True)
-                except Exception as commit_err:
-                    print(f"[Antigravity批量上传] 提交失败: {commit_err}", flush=True)
+                # 每50个凭证提交一次
+                if success_count % 50 == 0:
+                    try:
+                        await db.commit()
+                        print(f"[Antigravity批量上传] 已提交 {success_count} 个凭证", flush=True)
+                    except Exception as commit_err:
+                        print(f"[Antigravity批量上传] 提交失败: {commit_err}", flush=True)
             
         except json.JSONDecodeError:
             results.append({"filename": filename, "status": "error", "message": "JSON 格式错误"})
