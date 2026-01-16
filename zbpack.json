@@ -1,7 +1,4 @@
 {
-  "zbpack": "python",
-  "root_directory": "backend",
-  "build_command": "cd ../frontend && npm ci && npm run build -- --outDir ../backend/static && cd ../backend && pip install -r requirements.txt",
-  "start_command": "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}",
-  "serverless": false
+  "build_type": "dockerfile",
+  "dockerfile": "Dockerfile"
 }
