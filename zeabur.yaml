@@ -19,7 +19,6 @@ spec:
       template: GIT_DEPLOY
       source:
         repoURL: https://github.com/mzrodyu/CatieCli
-        rootDirectory: backend
       env:
         - key: ADMIN_USERNAME
           description: 管理员用户名
