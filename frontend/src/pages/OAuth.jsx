@@ -1,11 +1,12 @@
 import {
-    ArrowLeft,
-    Cat,
-    Check,
-    ExternalLink,
-    Key,
-    RefreshCw,
-    X,
+  ArrowLeft,
+  Cat,
+  Check,
+  Download,
+  ExternalLink,
+  Key,
+  RefreshCw,
+  X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
