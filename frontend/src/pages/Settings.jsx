@@ -61,6 +61,9 @@ export default function Settings() {
       formData.append('stats_quota_30pro', config.stats_quota_30pro ?? 0)
       formData.append('antigravity_enabled', config.antigravity_enabled)
       formData.append('antigravity_system_prompt', config.antigravity_system_prompt || '')
+      formData.append('antigravity_quota_enabled', config.antigravity_quota_enabled ?? true)
+      formData.append('antigravity_quota_default', config.antigravity_quota_default ?? 100)
+      formData.append('antigravity_quota_contributor', config.antigravity_quota_contributor ?? 500)
       
       await api.post('/api/manage/config', formData)
       setMessage({ type: 'success', text: '配置已保存！' })
@@ -543,6 +546,54 @@ You are Antigravity, a powerful agentic AI coding assistant designed by the Goog
                 <p className="text-gray-500 text-xs mt-2">
                   💡 这个提示词会自动添加到每个 Antigravity 请求的 systemInstruction 开头。留空可能导致 Claude 模型 429 错误。
                 </p>
+              </div>
+            )}
+            
+            {/* Antigravity 配额设置 */}
+            {config?.antigravity_enabled && (
+              <div className="mt-4 bg-gray-700/30 rounded-lg p-4">
+                <div className="flex justify-between items-center mb-3">
+                  <div>
+                    <label className="block text-sm font-medium">📊 Antigravity 配额限制</label>
+                    <p className="text-gray-400 text-xs">限制用户每日 Antigravity API 调用次数</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={config?.antigravity_quota_enabled ?? true}
+                      onChange={(e) => setConfig({ ...config, antigravity_quota_enabled: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
+                  </label>
+                </div>
+                
+                {config?.antigravity_quota_enabled && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm text-gray-400 mb-1 block">默认配额</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={config?.antigravity_quota_default ?? 100}
+                        onChange={(e) => setConfig({ ...config, antigravity_quota_default: parseInt(e.target.value) || 0 })}
+                        className="w-full bg-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                      <p className="text-gray-500 text-xs mt-1">普通用户每日可调用次数</p>
+                    </div>
+                    <div>
+                      <label className="text-sm text-gray-400 mb-1 block">贡献者配额</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={config?.antigravity_quota_contributor ?? 500}
+                        onChange={(e) => setConfig({ ...config, antigravity_quota_contributor: parseInt(e.target.value) || 0 })}
+                        className="w-full bg-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                      <p className="text-gray-500 text-xs mt-1">贡献凭证用户每日可调用次数</p>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

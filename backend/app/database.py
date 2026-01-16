@@ -110,6 +110,9 @@ async def init_db(skip_migration_check: bool = False):
                 "ALTER TABLE credentials ADD COLUMN credential_type VARCHAR(20) DEFAULT 'oauth'",
                 "ALTER TABLE credentials ADD COLUMN model_tier VARCHAR(20)",
                 "ALTER TABLE credentials ADD COLUMN model_cooldowns TEXT",
+                # Antigravity 用户配额
+                "ALTER TABLE users ADD COLUMN quota_antigravity INTEGER DEFAULT 100",
+                "ALTER TABLE users ADD COLUMN used_antigravity INTEGER DEFAULT 0",
             ]
         else:
             # PostgreSQL 迁移（使用 IF NOT EXISTS 语法）
@@ -139,6 +142,9 @@ async def init_db(skip_migration_check: bool = False):
                 "ALTER TABLE credentials ADD COLUMN IF NOT EXISTS credential_type VARCHAR(20) DEFAULT 'oauth'",
                 "ALTER TABLE credentials ADD COLUMN IF NOT EXISTS model_tier VARCHAR(20)",
                 "ALTER TABLE credentials ADD COLUMN IF NOT EXISTS model_cooldowns TEXT",
+                # Antigravity 用户配额
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS quota_antigravity INTEGER DEFAULT 100",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS used_antigravity INTEGER DEFAULT 0",
             ]
         
         for sql in migrations:

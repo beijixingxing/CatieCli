@@ -918,6 +918,10 @@ async def get_config(user: User = Depends(get_current_admin)):
         "stats_quota_25pro": settings.stats_quota_25pro,
         "stats_quota_30pro": settings.stats_quota_30pro,
         "antigravity_enabled": settings.antigravity_enabled,
+        "antigravity_system_prompt": settings.antigravity_system_prompt,
+        "antigravity_quota_enabled": settings.antigravity_quota_enabled,
+        "antigravity_quota_default": settings.antigravity_quota_default,
+        "antigravity_quota_contributor": settings.antigravity_quota_contributor,
     }
 
 
@@ -983,6 +987,10 @@ async def update_config(
     stats_quota_25pro: Optional[int] = Form(None),
     stats_quota_30pro: Optional[int] = Form(None),
     antigravity_enabled: Optional[bool] = Form(None),
+    antigravity_system_prompt: Optional[str] = Form(None),
+    antigravity_quota_enabled: Optional[bool] = Form(None),
+    antigravity_quota_default: Optional[int] = Form(None),
+    antigravity_quota_contributor: Optional[int] = Form(None),
     user: User = Depends(get_current_admin)
 ):
     """更新配置（持久化保存到数据库）"""
@@ -1132,6 +1140,22 @@ async def update_config(
         settings.antigravity_enabled = antigravity_enabled
         await save_config_to_db("antigravity_enabled", antigravity_enabled)
         updated["antigravity_enabled"] = antigravity_enabled
+    if antigravity_system_prompt is not None:
+        settings.antigravity_system_prompt = antigravity_system_prompt
+        await save_config_to_db("antigravity_system_prompt", antigravity_system_prompt)
+        updated["antigravity_system_prompt"] = antigravity_system_prompt
+    if antigravity_quota_enabled is not None:
+        settings.antigravity_quota_enabled = antigravity_quota_enabled
+        await save_config_to_db("antigravity_quota_enabled", antigravity_quota_enabled)
+        updated["antigravity_quota_enabled"] = antigravity_quota_enabled
+    if antigravity_quota_default is not None:
+        settings.antigravity_quota_default = antigravity_quota_default
+        await save_config_to_db("antigravity_quota_default", antigravity_quota_default)
+        updated["antigravity_quota_default"] = antigravity_quota_default
+    if antigravity_quota_contributor is not None:
+        settings.antigravity_quota_contributor = antigravity_quota_contributor
+        await save_config_to_db("antigravity_quota_contributor", antigravity_quota_contributor)
+        updated["antigravity_quota_contributor"] = antigravity_quota_contributor
     
     return {"message": "配置已保存", "updated": updated}
 

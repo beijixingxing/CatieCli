@@ -303,6 +303,22 @@ async def chat_completions(
                 detail=f"速率限制: {max_rpm} 次/分钟"
             )
     
+    # Antigravity 配额检查
+    if settings.antigravity_quota_enabled and not user.is_admin:
+        # 获取用户配额（先检查用户自定义配额，否则用系统默认）
+        user_quota = user.quota_antigravity if user.quota_antigravity > 0 else settings.antigravity_quota_default
+        user_used = user.used_antigravity or 0
+        
+        if user_used >= user_quota:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Antigravity 配额已用尽: {user_used}/{user_quota}"
+            )
+        
+        # 扣减配额（先扣减，如果请求失败会在日志中记录）
+        user.used_antigravity = user_used + 1
+        await db.commit()
+    
     # 插入占位记录
     placeholder_log = UsageLog(
         user_id=user.id,

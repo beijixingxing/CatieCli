@@ -23,6 +23,9 @@ class User(Base):
     quota_flash = Column(Integer, default=0)   # Flash模型配额
     quota_25pro = Column(Integer, default=0)   # 2.5 Pro模型配额
     quota_30pro = Column(Integer, default=0)   # 3.0模型配额
+    # Antigravity 配额
+    quota_antigravity = Column(Integer, default=100)  # Antigravity 每日配额
+    used_antigravity = Column(Integer, default=0)     # 当天已使用次数
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # 关系

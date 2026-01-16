@@ -124,6 +124,10 @@ You are Antigravity, a powerful agentic AI coding assistant designed by the Goog
     # Antigravity OAuth 配置（留空则使用默认值，见 antigravity_oauth.py）
     antigravity_client_id: str = ""
     antigravity_client_secret: str = ""
+    # Antigravity 配额配置
+    antigravity_quota_enabled: bool = True         # 是否启用 Antigravity 配额限制
+    antigravity_quota_default: int = 100           # 默认 Antigravity 每日配额
+    antigravity_quota_contributor: int = 500       # 贡献凭证奖励配额
     
     # Discord OAuth (可选，用于 Discord 登录/注册)
     discord_client_id: str = ""
@@ -170,6 +174,9 @@ PERSISTENT_CONFIG_KEYS = [
     "announcement_read_seconds",
     "antigravity_enabled",
     "antigravity_system_prompt",
+    "antigravity_quota_enabled",
+    "antigravity_quota_default",
+    "antigravity_quota_contributor",
 ]
 
 
