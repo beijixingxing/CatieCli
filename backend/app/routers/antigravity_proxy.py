@@ -518,10 +518,34 @@ async def chat_completions(
                 
             except Exception as e:
                 error_str = str(e)
-                await CredentialPool.handle_credential_failure(db, credential.id, error_str)
                 last_error = error_str
                 
-                should_retry = any(code in error_str for code in ["404", "500", "502", "503", "504", "429", "RESOURCE_EXHAUSTED", "NOT_FOUND", "ECONNRESET", "socket hang up", "ConnectionReset", "Connection reset", "ETIMEDOUT", "ECONNREFUSED", "Gateway Timeout", "timeout"])
+                # 检查是否是 Token 过期导致的 401 错误
+                is_auth_error = any(code in error_str for code in ["401", "UNAUTHENTICATED", "invalid_grant", "Token has been expired", "token expired"])
+                
+                if is_auth_error:
+                    # 先尝试刷新当前凭证的 Token
+                    print(f"[Antigravity Proxy] ⚠️ 认证失败，尝试刷新 Token: {credential.email}", flush=True)
+                    new_token = await CredentialPool.refresh_access_token(credential)
+                    
+                    if new_token:
+                        # 刷新成功，更新凭证并重试
+                        from app.services.crypto import encrypt_credential
+                        credential.api_key = encrypt_credential(new_token)
+                        await db.commit()
+                        client = AntigravityClient(new_token, project_id)
+                        print(f"[Antigravity Proxy] ✅ Token 刷新成功，使用相同凭证重试: {credential.email}", flush=True)
+                        continue
+                    else:
+                        # 刷新失败，禁用凭证
+                        print(f"[Antigravity Proxy] ❌ Token 刷新失败，禁用凭证: {credential.email}", flush=True)
+                        await CredentialPool.handle_credential_failure(db, credential.id, error_str)
+                else:
+                    # 非认证错误，照常处理
+                    await CredentialPool.handle_credential_failure(db, credential.id, error_str)
+                
+                # 决定是否切换凭证重试（增加401到重试列表）
+                should_retry = any(code in error_str for code in ["401", "404", "500", "502", "503", "504", "429", "UNAUTHENTICATED", "RESOURCE_EXHAUSTED", "NOT_FOUND", "ECONNRESET", "socket hang up", "ConnectionReset", "Connection reset", "ETIMEDOUT", "ECONNREFUSED", "Gateway Timeout", "timeout"])
                 
                 if should_retry and retry_attempt < max_retries:
                     print(f"[Antigravity Proxy] ⚠️ 请求失败: {error_str}，切换凭证重试 ({retry_attempt + 2}/{max_retries + 1})", flush=True)
@@ -668,13 +692,45 @@ async def chat_completions(
                 error_str = str(e)
                 last_error = error_str
                 
-                try:
-                    async with async_session() as bg_db:
-                        await CredentialPool.handle_credential_failure(bg_db, credential.id, error_str)
-                except:
-                    pass
+                # 检查是否是 Token 过期导致的 401 错误
+                is_auth_error = any(code in error_str for code in ["401", "UNAUTHENTICATED", "invalid_grant", "Token has been expired", "token expired"])
                 
-                should_retry = any(code in error_str for code in ["404", "500", "502", "503", "504", "429", "RESOURCE_EXHAUSTED", "NOT_FOUND"])
+                if is_auth_error:
+                    # 先尝试刷新当前凭证的 Token
+                    print(f"[Antigravity Proxy] ⚠️ 假非流认证失败，尝试刷新 Token: {credential.email}", flush=True)
+                    try:
+                        async with async_session() as bg_db:
+                            # 重新获取凭证
+                            from sqlalchemy import select
+                            from app.models.user import Credential as CredentialModel
+                            result = await bg_db.execute(select(CredentialModel).where(CredentialModel.id == credential.id))
+                            cred_obj = result.scalar_one_or_none()
+                            if cred_obj:
+                                new_token = await CredentialPool.refresh_access_token(cred_obj)
+                                if new_token:
+                                    # 刷新成功，更新凭证并重试
+                                    from app.services.crypto import encrypt_credential
+                                    cred_obj.api_key = encrypt_credential(new_token)
+                                    await bg_db.commit()
+                                    access_token = new_token
+                                    client = AntigravityClient(new_token, project_id)
+                                    print(f"[Antigravity Proxy] ✅ 假非流 Token 刷新成功: {credential.email}", flush=True)
+                                    continue
+                                else:
+                                    # 刷新失败，禁用凭证
+                                    print(f"[Antigravity Proxy] ❌ 假非流 Token 刷新失败: {credential.email}", flush=True)
+                                    await CredentialPool.handle_credential_failure(bg_db, credential.id, error_str)
+                    except Exception as refresh_err:
+                        print(f"[Antigravity Proxy] ⚠️ 假非流 Token 刷新异常: {refresh_err}", flush=True)
+                else:
+                    # 非认证错误，照常处理
+                    try:
+                        async with async_session() as bg_db:
+                            await CredentialPool.handle_credential_failure(bg_db, credential.id, error_str)
+                    except:
+                        pass
+                
+                should_retry = any(code in error_str for code in ["401", "404", "500", "502", "503", "504", "429", "UNAUTHENTICATED", "RESOURCE_EXHAUSTED", "NOT_FOUND"])
                 
                 if should_retry and retry_attempt < max_retries:
                     print(f"[Antigravity Proxy] ⚠️ 假非流请求失败: {error_str}，切换凭证重试 ({retry_attempt + 2}/{max_retries + 1})", flush=True)
@@ -809,13 +865,41 @@ async def chat_completions(
                 error_str = str(e)
                 last_error = error_str
                 
-                try:
-                    async with async_session() as stream_db:
-                        await CredentialPool.handle_credential_failure(stream_db, current_cred_id, error_str)
-                except Exception as db_err:
-                    print(f"[Antigravity Proxy] ⚠️ 标记凭证失败时出错: {db_err}", flush=True)
+                # 检查是否是 Token 过期导致的 401 错误
+                is_auth_error = any(code in error_str for code in ["401", "UNAUTHENTICATED", "invalid_grant", "Token has been expired", "token expired"])
                 
-                should_retry = any(code in error_str for code in ["404", "500", "502", "503", "504", "429", "RESOURCE_EXHAUSTED", "NOT_FOUND", "ECONNRESET", "socket hang up", "ConnectionReset", "Connection reset", "ETIMEDOUT", "ECONNREFUSED", "Gateway Timeout", "timeout"])
+                if is_auth_error:
+                    # 先尝试刷新当前凭证的 Token
+                    print(f"[Antigravity Proxy] ⚠️ 流式认证失败，尝试刷新 Token: {current_cred_email}", flush=True)
+                    try:
+                        async with async_session() as stream_db:
+                            from sqlalchemy import select
+                            from app.models.user import Credential as CredentialModel
+                            result = await stream_db.execute(select(CredentialModel).where(CredentialModel.id == current_cred_id))
+                            cred_obj = result.scalar_one_or_none()
+                            if cred_obj:
+                                new_token = await CredentialPool.refresh_access_token(cred_obj)
+                                if new_token:
+                                    from app.services.crypto import encrypt_credential
+                                    cred_obj.api_key = encrypt_credential(new_token)
+                                    await stream_db.commit()
+                                    access_token = new_token
+                                    client = AntigravityClient(new_token, project_id)
+                                    print(f"[Antigravity Proxy] ✅ 流式 Token 刷新成功: {current_cred_email}", flush=True)
+                                    continue
+                                else:
+                                    print(f"[Antigravity Proxy] ❌ 流式 Token 刷新失败: {current_cred_email}", flush=True)
+                                    await CredentialPool.handle_credential_failure(stream_db, current_cred_id, error_str)
+                    except Exception as refresh_err:
+                        print(f"[Antigravity Proxy] ⚠️ 流式 Token 刷新异常: {refresh_err}", flush=True)
+                else:
+                    try:
+                        async with async_session() as stream_db:
+                            await CredentialPool.handle_credential_failure(stream_db, current_cred_id, error_str)
+                    except Exception as db_err:
+                        print(f"[Antigravity Proxy] ⚠️ 标记凭证失败时出错: {db_err}", flush=True)
+                
+                should_retry = any(code in error_str for code in ["401", "404", "500", "502", "503", "504", "429", "UNAUTHENTICATED", "RESOURCE_EXHAUSTED", "NOT_FOUND", "ECONNRESET", "socket hang up", "ConnectionReset", "Connection reset", "ETIMEDOUT", "ECONNREFUSED", "Gateway Timeout", "timeout"])
                 
                 if should_retry and stream_retry < max_retries:
                     print(f"[Antigravity Proxy] ⚠️ 流式请求失败: {error_str}，切换凭证重试 ({stream_retry + 2}/{max_retries + 1})", flush=True)
