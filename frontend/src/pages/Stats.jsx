@@ -241,38 +241,61 @@ export default function Stats() {
             </div>
 
             {/* 按模型分类 - 请求数/总额度 */}
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <div className="bg-cyan-600/20 border border-cyan-600/30 rounded-lg p-4 text-center">
-                <div className="text-2xl font-bold text-cyan-400">
-                  {globalStats.requests.by_category.flash}
-                  <span className="text-lg text-cyan-300">
-                    /{globalStats.total_quota?.flash ?? "-"}
-                  </span>
+            {apiType !== "antigravity" ? (
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="bg-cyan-600/20 border border-cyan-600/30 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-cyan-400">
+                    {globalStats.requests.by_category.flash}
+                    <span className="text-lg text-cyan-300">
+                      /{globalStats.total_quota?.flash ?? "-"}
+                    </span>
+                  </div>
+                  <div className="text-sm text-cyan-300">Flash 请求</div>
                 </div>
-                <div className="text-sm text-cyan-300">Flash 请求</div>
-              </div>
-              <div className="bg-orange-600/20 border border-orange-600/30 rounded-lg p-4 text-center">
-                <div className="text-2xl font-bold text-orange-400">
-                  {globalStats.requests.by_category["pro_2.5"]}
-                  <span className="text-lg text-orange-300">
-                    /{globalStats.total_quota?.["pro_2.5"] ?? "-"}
-                  </span>
+                <div className="bg-orange-600/20 border border-orange-600/30 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-orange-400">
+                    {globalStats.requests.by_category["pro_2.5"]}
+                    <span className="text-lg text-orange-300">
+                      /{globalStats.total_quota?.["pro_2.5"] ?? "-"}
+                    </span>
+                  </div>
+                  <div className="text-sm text-orange-300">2.5 Pro 请求</div>
                 </div>
-                <div className="text-sm text-orange-300">2.5 Pro 请求</div>
-              </div>
-              <div className="bg-pink-600/20 border border-pink-600/30 rounded-lg p-4 text-center">
-                <div className="text-2xl font-bold text-pink-400">
-                  {globalStats.requests.by_category.tier_3}
-                  <span className="text-lg text-pink-300">
-                    /{globalStats.total_quota?.tier_3 ?? "-"}
-                  </span>
+                <div className="bg-pink-600/20 border border-pink-600/30 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-pink-400">
+                    {globalStats.requests.by_category.tier_3}
+                    <span className="text-lg text-pink-300">
+                      /{globalStats.total_quota?.tier_3 ?? "-"}
+                    </span>
+                  </div>
+                  <div className="text-sm text-pink-300">3.0 请求</div>
                 </div>
-                <div className="text-sm text-pink-300">3.0 请求</div>
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="bg-green-600/20 border border-green-600/30 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-green-400">
+                    {globalStats.requests.by_category.flash}
+                  </div>
+                  <div className="text-sm text-green-300">Flash 请求</div>
+                </div>
+                <div className="bg-green-600/20 border border-green-600/30 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-green-400">
+                    {globalStats.requests.by_category["pro_2.5"]}
+                  </div>
+                  <div className="text-sm text-green-300">Pro 请求</div>
+                </div>
+                <div className="bg-green-600/20 border border-green-600/30 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-green-400">
+                    {globalStats.requests.by_category.tier_3}
+                  </div>
+                  <div className="text-sm text-green-300">3.0 请求</div>
+                </div>
+              </div>
+            )}
 
-            {/* 按用户类型的配额分解 */}
-            {globalStats.quota_breakdown && (
+            {/* 按用户类型的配额分解 - 只在非Antigravity模式显示 */}
+            {apiType !== "antigravity" && globalStats.quota_breakdown && (
               <div className="bg-gray-700/30 rounded-lg p-4 mb-4">
                 <div className="text-sm text-gray-400 mb-3">
                   📊 按用户类型配额分解
