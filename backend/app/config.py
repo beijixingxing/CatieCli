@@ -103,6 +103,11 @@ class Settings(BaseSettings):
     announcement_content: str = ""
     announcement_read_seconds: int = 5  # 阅读多少秒才能关闭
     
+    # OAuth 操作指引弹窗
+    oauth_guide_enabled: bool = True   # 是否显示操作指引弹窗
+    oauth_guide_seconds: int = 8       # 倒计时秒数（0=无倒计时立即可关闭）
+
+    
     # Google OAuth (Gemini CLI 官方配置)
     google_client_id: str = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
     google_client_secret: str = "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"
@@ -182,6 +187,8 @@ PERSISTENT_CONFIG_KEYS = [
     "antigravity_quota_contributor",
     "antigravity_base_rpm",
     "antigravity_contributor_rpm",
+    "oauth_guide_enabled",
+    "oauth_guide_seconds",
 ]
 
 

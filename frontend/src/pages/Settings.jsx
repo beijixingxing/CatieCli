@@ -93,6 +93,11 @@ export default function Settings() {
         "antigravity_contributor_rpm",
         config.antigravity_contributor_rpm ?? 10,
       );
+      formData.append(
+        "oauth_guide_enabled",
+        config.oauth_guide_enabled ?? true,
+      );
+      formData.append("oauth_guide_seconds", config.oauth_guide_seconds ?? 8);
 
       await api.post("/api/manage/config", formData);
       setMessage({ type: "success", text: "配置已保存！" });
@@ -729,6 +734,57 @@ export default function Settings() {
                   />
                   <p className="text-gray-500 text-sm mt-1">
                     用户首次阅读需等待此时间才能关闭公告
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* OAuth 操作指引弹窗 */}
+          <div className="pt-4 border-t border-gray-700">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="font-semibold">📖 OAuth 操作指引弹窗</h3>
+                <p className="text-gray-400 text-sm">
+                  用户获取凭证时显示的操作指引弹窗
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={config?.oauth_guide_enabled ?? true}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      oauth_guide_enabled: e.target.checked,
+                    })
+                  }
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-cyan-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
+              </label>
+            </div>
+            {config?.oauth_guide_enabled && (
+              <div className="mt-4 space-y-4 pl-4 border-l-2 border-cyan-500/30">
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    倒计时等待（秒）
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="30"
+                    value={config?.oauth_guide_seconds ?? 8}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        oauth_guide_seconds: parseInt(e.target.value) || 0,
+                      })
+                    }
+                    className="w-32 bg-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                  />
+                  <p className="text-gray-500 text-sm mt-1">
+                    用户需等待此时间才能关闭指引弹窗（0=可立即关闭）
                   </p>
                 </div>
               </div>

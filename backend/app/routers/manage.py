@@ -1036,6 +1036,8 @@ async def get_config(user: User = Depends(get_current_admin)):
         "antigravity_quota_contributor": settings.antigravity_quota_contributor,
         "antigravity_base_rpm": settings.antigravity_base_rpm,
         "antigravity_contributor_rpm": settings.antigravity_contributor_rpm,
+        "oauth_guide_enabled": settings.oauth_guide_enabled,
+        "oauth_guide_seconds": settings.oauth_guide_seconds,
     }
 
 
@@ -1063,6 +1065,8 @@ async def get_public_config():
         "credential_pool_mode": settings.credential_pool_mode,
         "base_rpm": settings.base_rpm,
         "contributor_rpm": settings.contributor_rpm,
+        "oauth_guide_enabled": settings.oauth_guide_enabled,
+        "oauth_guide_seconds": settings.oauth_guide_seconds,
     }
 
 
@@ -1107,6 +1111,8 @@ async def update_config(
     antigravity_quota_contributor: Optional[int] = Form(None),
     antigravity_base_rpm: Optional[int] = Form(None),
     antigravity_contributor_rpm: Optional[int] = Form(None),
+    oauth_guide_enabled: Optional[bool] = Form(None),
+    oauth_guide_seconds: Optional[int] = Form(None),
     user: User = Depends(get_current_admin)
 ):
     """更新配置（持久化保存到数据库）"""
@@ -1280,6 +1286,16 @@ async def update_config(
         settings.antigravity_contributor_rpm = antigravity_contributor_rpm
         await save_config_to_db("antigravity_contributor_rpm", antigravity_contributor_rpm)
         updated["antigravity_contributor_rpm"] = antigravity_contributor_rpm
+    
+    # OAuth 操作指引弹窗配置
+    if oauth_guide_enabled is not None:
+        settings.oauth_guide_enabled = oauth_guide_enabled
+        await save_config_to_db("oauth_guide_enabled", oauth_guide_enabled)
+        updated["oauth_guide_enabled"] = oauth_guide_enabled
+    if oauth_guide_seconds is not None:
+        settings.oauth_guide_seconds = oauth_guide_seconds
+        await save_config_to_db("oauth_guide_seconds", oauth_guide_seconds)
+        updated["oauth_guide_seconds"] = oauth_guide_seconds
     
     return {"message": "配置已保存", "updated": updated}
 

@@ -1,12 +1,12 @@
 import {
-  ArrowLeft,
-  Cat,
-  Check,
-  Download,
-  ExternalLink,
-  Key,
-  RefreshCw,
-  X,
+    ArrowLeft,
+    Cat,
+    Check,
+    Download,
+    ExternalLink,
+    Key,
+    RefreshCw,
+    X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -23,7 +23,17 @@ export default function OAuth() {
   const [isDonate, setIsDonate] = useState(true);
   const [forceDonate, setForceDonate] = useState(false);
 
-  // 获取强制捐赠配置
+  // 引导流程状态
+  const [showGuide, setShowGuide] = useState(false);
+  const [countdown, setCountdown] = useState(8);
+  const [showQuiz, setShowQuiz] = useState(false);
+  const [quizPassed, setQuizPassed] = useState(false);
+
+  // OAuth 弹窗配置
+  const [guideEnabled, setGuideEnabled] = useState(true);
+  const [guideSeconds, setGuideSeconds] = useState(8);
+
+  // 获取强制捐赠和OAuth弹窗配置
   useEffect(() => {
     api
       .get("/api/manage/public-config")
@@ -32,15 +42,16 @@ export default function OAuth() {
           setForceDonate(true);
           setIsDonate(true);
         }
+        // OAuth 弹窗配置
+        if (res.data.oauth_guide_enabled !== undefined) {
+          setGuideEnabled(res.data.oauth_guide_enabled);
+        }
+        if (res.data.oauth_guide_seconds !== undefined) {
+          setGuideSeconds(res.data.oauth_guide_seconds);
+        }
       })
       .catch(() => {});
   }, []);
-
-  // 引导流程状态
-  const [showGuide, setShowGuide] = useState(false);
-  const [countdown, setCountdown] = useState(8);
-  const [showQuiz, setShowQuiz] = useState(false);
-  const [quizPassed, setQuizPassed] = useState(false);
 
   // 倒计时效果
   useEffect(() => {
@@ -58,9 +69,15 @@ export default function OAuth() {
         params: { get_all_projects: false },
       });
       setAuthUrl(res.data.auth_url);
-      // 显示引导弹窗
-      setShowGuide(true);
-      setCountdown(8);
+
+      // 根据配置决定是否显示引导弹窗
+      if (guideEnabled) {
+        setShowGuide(true);
+        setCountdown(guideSeconds);
+      } else {
+        // 弹窗禁用，直接跳问答或打开链接
+        setShowQuiz(true);
+      }
     } catch (err) {
       setMessage({
         type: "error",

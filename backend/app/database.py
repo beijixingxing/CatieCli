@@ -113,6 +113,8 @@ async def init_db(skip_migration_check: bool = False):
                 # Antigravity 用户配额
                 "ALTER TABLE users ADD COLUMN quota_antigravity INTEGER DEFAULT 100",
                 "ALTER TABLE users ADD COLUMN used_antigravity INTEGER DEFAULT 0",
+                # 凭证备注
+                "ALTER TABLE credentials ADD COLUMN note VARCHAR(500)",
             ]
         else:
             # PostgreSQL 迁移（使用 IF NOT EXISTS 语法）
@@ -145,6 +147,8 @@ async def init_db(skip_migration_check: bool = False):
                 # Antigravity 用户配额
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS quota_antigravity INTEGER DEFAULT 100",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS used_antigravity INTEGER DEFAULT 0",
+                # 凭证备注
+                "ALTER TABLE credentials ADD COLUMN IF NOT EXISTS note VARCHAR(500)",
             ]
         
         for sql in migrations:
