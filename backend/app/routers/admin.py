@@ -254,6 +254,7 @@ async def list_credentials(
                 "name": c.name,
                 "email": c.email,
                 "api_key": c.api_key[:20] + "..." if c.api_key and len(c.api_key) > 20 else (c.api_key or ""),
+                "api_type": c.api_type or "geminicli",  # 默认为geminicli
                 "model_tier": c.model_tier,
                 "is_active": c.is_active,
                 "total_requests": c.total_requests or 0,
