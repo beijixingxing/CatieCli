@@ -891,25 +891,38 @@ async def get_stats_by_model(
     days: int = 7,
     page: int = 1,
     page_size: int = 10,
+    api_type: str = "all",  # all, cli, antigravity
     user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    """按模型统计使用量（支持分页）"""
+    """按模型统计使用量（支持分页和API类型过滤）"""
     since = datetime.utcnow() - timedelta(days=days)
+    
+    # 构建 API 类型过滤条件
+    def build_api_type_filter():
+        if api_type == "cli":
+            return UsageLog.model.notlike('antigravity/%')
+        elif api_type == "antigravity":
+            return UsageLog.model.like('antigravity/%')
+        else:
+            return True
+    
+    api_filter = build_api_type_filter()
     
     # 基础查询
     base_query = (
         select(UsageLog.model, func.count(UsageLog.id).label("count"))
         .where(UsageLog.created_at >= since)
-        .group_by(UsageLog.model)
-        .order_by(func.count(UsageLog.id).desc())
     )
+    if api_type != "all":
+        base_query = base_query.where(api_filter)
+    base_query = base_query.group_by(UsageLog.model).order_by(func.count(UsageLog.id).desc())
     
     # 获取总数
-    total_result = await db.execute(
-        select(func.count(func.distinct(UsageLog.model)))
-        .where(UsageLog.created_at >= since)
-    )
+    total_query = select(func.count(func.distinct(UsageLog.model))).where(UsageLog.created_at >= since)
+    if api_type != "all":
+        total_query = total_query.where(api_filter)
+    total_result = await db.execute(total_query)
     total = total_result.scalar() or 0
     total_pages = (total + page_size - 1) // page_size if page_size > 0 else 1
     

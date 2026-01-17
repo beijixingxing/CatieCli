@@ -45,7 +45,7 @@ export default function Stats() {
       api.get("/api/manage/stats/overview"),
       api.get(`/api/manage/stats/global?api_type=${apiType}`),
       api.get(
-        `/api/manage/stats/by-model?days=${days}&page=${modelPage}&page_size=10`,
+        `/api/manage/stats/by-model?days=${days}&page=${modelPage}&page_size=10&api_type=${apiType}`,
       ),
       api.get(`/api/manage/stats/by-user?days=${days}`),
       api.get(`/api/manage/stats/daily?days=${days}`),
