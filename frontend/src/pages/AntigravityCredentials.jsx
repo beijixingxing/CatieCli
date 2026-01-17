@@ -10,189 +10,284 @@ import {
     Shield,
     Trash2,
     Upload,
-    X
-} from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import api from '../api'
-import { useAuth } from '../App'
+    X,
+} from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import api from "../api";
+import { useAuth } from "../App";
 
 export default function AntigravityCredentials() {
-  const { user } = useAuth()
-  const [credentials, setCredentials] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [uploadFiles, setUploadFiles] = useState([])
-  const [uploadPublic, setUploadPublic] = useState(true)
-  const [uploading, setUploading] = useState(false)
-  const [message, setMessage] = useState({ type: '', text: '' })
-  const [dragOver, setDragOver] = useState(false)
-  const [verifyResult, setVerifyResult] = useState(null)
-  const [quotaResult, setQuotaResult] = useState(null)
-  const [loadingQuota, setLoadingQuota] = useState(null)
-  const [stats, setStats] = useState(null)
+  const { user } = useAuth();
+  const [credentials, setCredentials] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [uploadFiles, setUploadFiles] = useState([]);
+  const [uploadPublic, setUploadPublic] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [message, setMessage] = useState({ type: "", text: "" });
+  const [dragOver, setDragOver] = useState(false);
+  const [verifyResult, setVerifyResult] = useState(null);
+  const [quotaResult, setQuotaResult] = useState(null);
+  const [loadingQuota, setLoadingQuota] = useState(null);
+  const [stats, setStats] = useState(null);
 
   useEffect(() => {
-    fetchCredentials()
-    fetchStats()
-  }, [])
+    fetchCredentials();
+    fetchStats();
+  }, []);
 
   const fetchCredentials = async () => {
-    setLoading(true)
+    setLoading(true);
     try {
-      const res = await api.get('/api/antigravity/credentials')
-      setCredentials(res.data)
+      const res = await api.get("/api/antigravity/credentials");
+      setCredentials(res.data);
     } catch (err) {
-      setMessage({ type: 'error', text: '获取凭证失败' })
+      setMessage({ type: "error", text: "获取凭证失败" });
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const fetchStats = async () => {
     try {
-      const res = await api.get('/api/antigravity/stats')
-      setStats(res.data)
+      const res = await api.get("/api/antigravity/stats");
+      setStats(res.data);
     } catch (err) {
-      console.error('获取统计失败', err)
+      console.error("获取统计失败", err);
     }
-  }
+  };
 
   const uploadCredential = async () => {
-    if (uploadFiles.length === 0) return
-    setUploading(true)
-    setMessage({ type: '', text: '' })
+    if (uploadFiles.length === 0) return;
+    setUploading(true);
+    setMessage({ type: "", text: "" });
     try {
-      const formData = new FormData()
-      uploadFiles.forEach(file => formData.append('files', file))
-      formData.append('is_public', uploadPublic)
-      
-      const res = await api.post('/api/antigravity/credentials/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 600000
-      })
-      setMessage({ 
-        type: 'success', 
-        text: `上传完成: 成功 ${res.data.uploaded_count}/${res.data.total_count} 个` 
-      })
-      setUploadFiles([])
-      document.getElementById('antigravity-file-input').value = ''
-      fetchCredentials()
-      fetchStats()
+      const formData = new FormData();
+      uploadFiles.forEach((file) => formData.append("files", file));
+      formData.append("is_public", uploadPublic);
+
+      const res = await api.post(
+        "/api/antigravity/credentials/upload",
+        formData,
+        {
+          headers: { "Content-Type": "multipart/form-data" },
+          timeout: 600000,
+        },
+      );
+      setMessage({
+        type: "success",
+        text: `上传完成: 成功 ${res.data.uploaded_count}/${res.data.total_count} 个`,
+      });
+      setUploadFiles([]);
+      document.getElementById("antigravity-file-input").value = "";
+      fetchCredentials();
+      fetchStats();
     } catch (err) {
-      setMessage({ type: 'error', text: err.response?.data?.detail || '上传失败' })
+      setMessage({
+        type: "error",
+        text: err.response?.data?.detail || "上传失败",
+      });
     } finally {
-      setUploading(false)
+      setUploading(false);
     }
-  }
+  };
 
   const togglePublic = async (id, currentPublic) => {
     try {
       await api.patch(`/api/antigravity/credentials/${id}`, null, {
-        params: { is_public: !currentPublic }
-      })
-      fetchCredentials()
+        params: { is_public: !currentPublic },
+      });
+      fetchCredentials();
     } catch (err) {
-      setMessage({ type: 'error', text: err.response?.data?.detail || '操作失败' })
+      setMessage({
+        type: "error",
+        text: err.response?.data?.detail || "操作失败",
+      });
     }
-  }
+  };
 
   const toggleActive = async (id, currentActive) => {
     try {
       await api.patch(`/api/antigravity/credentials/${id}`, null, {
-        params: { is_active: !currentActive }
-      })
-      fetchCredentials()
+        params: { is_active: !currentActive },
+      });
+      fetchCredentials();
     } catch (err) {
-      setMessage({ type: 'error', text: '操作失败' })
+      setMessage({ type: "error", text: "操作失败" });
     }
-  }
+  };
 
   const deleteCred = async (id) => {
-    if (!confirm('确定删除此凭证？此操作不可恢复！')) return
+    if (!confirm("确定删除此凭证？此操作不可恢复！")) return;
     try {
-      await api.delete(`/api/antigravity/credentials/${id}`)
-      setMessage({ type: 'success', text: '删除成功' })
-      fetchCredentials()
-      fetchStats()
+      await api.delete(`/api/antigravity/credentials/${id}`);
+      setMessage({ type: "success", text: "删除成功" });
+      fetchCredentials();
+      fetchStats();
     } catch (err) {
-      setMessage({ type: 'error', text: '删除失败' })
+      setMessage({ type: "error", text: "删除失败" });
     }
-  }
+  };
 
-  const [verifying, setVerifying] = useState(null)
-  
-  const exportCred = async (id, email) => {
+  const [verifying, setVerifying] = useState(null);
+
+  // 导出格式选择弹窗
+  const [exportModal, setExportModal] = useState(null); // { id, email }
+
+  const showExportModal = (id, email) => {
+    setExportModal({ id, email });
+  };
+
+  const exportCred = async (format = "full") => {
+    if (!exportModal) return;
+    const { id, email } = exportModal;
     try {
-      const res = await api.get(`/api/antigravity/credentials/${id}/export`)
-      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `antigravity_${email || id}.json`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      setMessage({ type: 'success', text: '凭证已导出！' })
+      const res = await api.get(`/api/antigravity/credentials/${id}/export`, {
+        params: { format },
+      });
+      const blob = new Blob([JSON.stringify(res.data, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download =
+        format === "simple"
+          ? `simple_${email || id}.json`
+          : `antigravity_${email || id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setMessage({ type: "success", text: "凭证已导出！" });
+      setExportModal(null);
     } catch (err) {
-      setMessage({ type: 'error', text: '导出失败: ' + (err.response?.data?.detail || err.message) })
+      setMessage({
+        type: "error",
+        text: "导出失败: " + (err.response?.data?.detail || err.message),
+      });
     }
-  }
-  
+  };
+
   const verifyCred = async (id, email) => {
-    setVerifying(id)
+    setVerifying(id);
     try {
-      const res = await api.post(`/api/antigravity/credentials/${id}/verify`)
-      setVerifyResult({ ...res.data, email })
-      fetchCredentials()
+      const res = await api.post(`/api/antigravity/credentials/${id}/verify`);
+      setVerifyResult({ ...res.data, email });
+      fetchCredentials();
     } catch (err) {
-      setVerifyResult({ error: err.response?.data?.detail || err.message, is_valid: false, email })
+      setVerifyResult({
+        error: err.response?.data?.detail || err.message,
+        is_valid: false,
+        email,
+      });
     } finally {
-      setVerifying(null)
+      setVerifying(null);
     }
-  }
+  };
 
   const refreshProjectId = async (id, email) => {
-    setVerifying(id)
+    setVerifying(id);
     try {
-      const res = await api.post(`/api/antigravity/credentials/${id}/refresh-project-id`)
-      setVerifyResult({ ...res.data, email, is_project_id_refresh: true, is_valid: res.data.success })
+      const res = await api.post(
+        `/api/antigravity/credentials/${id}/refresh-project-id`,
+      );
+      setVerifyResult({
+        ...res.data,
+        email,
+        is_project_id_refresh: true,
+        is_valid: res.data.success,
+      });
       if (res.data.success) {
-        fetchCredentials()
+        fetchCredentials();
       }
     } catch (err) {
-      setVerifyResult({ error: err.response?.data?.detail || err.message, is_valid: false, email, is_project_id_refresh: true })
+      setVerifyResult({
+        error: err.response?.data?.detail || err.message,
+        is_valid: false,
+        email,
+        is_project_id_refresh: true,
+      });
     } finally {
-      setVerifying(null)
+      setVerifying(null);
     }
-  }
+  };
 
   const fetchQuota = async (id, email) => {
-    setLoadingQuota(id)
+    setLoadingQuota(id);
     try {
-      const res = await api.get(`/api/antigravity/credentials/${id}/quota`)
-      setQuotaResult({ ...res.data, email })
+      const res = await api.get(`/api/antigravity/credentials/${id}/quota`);
+      setQuotaResult({ ...res.data, email });
     } catch (err) {
-      setQuotaResult({ success: false, error: err.response?.data?.detail || err.message, email })
+      setQuotaResult({
+        success: false,
+        error: err.response?.data?.detail || err.message,
+        email,
+      });
     } finally {
-      setLoadingQuota(null)
+      setLoadingQuota(null);
     }
-  }
+  };
 
   const deleteAllInactive = async () => {
-    if (!confirm('确定删除所有失效的 Antigravity 凭证？此操作不可恢复！')) return
+    if (!confirm("确定删除所有失效的 Antigravity 凭证？此操作不可恢复！"))
+      return;
     try {
-      const res = await api.delete('/api/antigravity/credentials/inactive/batch')
-      setMessage({ type: 'success', text: res.data.message })
-      fetchCredentials()
-      fetchStats()
+      const res = await api.delete(
+        "/api/antigravity/credentials/inactive/batch",
+      );
+      setMessage({ type: "success", text: res.data.message });
+      fetchCredentials();
+      fetchStats();
     } catch (err) {
-      setMessage({ type: 'error', text: err.response?.data?.detail || '删除失败' })
+      setMessage({
+        type: "error",
+        text: err.response?.data?.detail || "删除失败",
+      });
     }
-  }
+  };
 
   return (
     <div className="min-h-screen">
+      {/* 导出格式选择弹窗 */}
+      {exportModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-dark-800 rounded-xl p-6 max-w-sm w-full mx-4 border border-dark-600">
+            <h3 className="text-lg font-bold mb-4">选择导出格式</h3>
+            <p className="text-gray-400 text-sm mb-4">
+              凭证: {exportModal.email}
+            </p>
+            <div className="space-y-3">
+              <button
+                onClick={() => exportCred("full")}
+                className="w-full p-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-left"
+              >
+                <div className="font-medium">完整格式</div>
+                <div className="text-xs text-blue-200 mt-1">
+                  包含 client_id, client_secret, refresh_token, token,
+                  project_id
+                </div>
+              </button>
+              <button
+                onClick={() => exportCred("simple")}
+                className="w-full p-3 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-left"
+              >
+                <div className="font-medium">简化格式</div>
+                <div className="text-xs text-orange-200 mt-1">
+                  仅包含 email + refresh_token
+                </div>
+              </button>
+            </div>
+            <button
+              onClick={() => setExportModal(null)}
+              className="w-full mt-4 p-2 rounded-lg bg-dark-700 hover:bg-dark-600 text-gray-400"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 导航栏 */}
       <nav className="bg-dark-900 border-b border-dark-700">
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
@@ -204,7 +299,10 @@ export default function AntigravityCredentials() {
               Antigravity 凭证
             </span>
           </div>
-          <Link to="/dashboard" className="text-gray-400 hover:text-white flex items-center gap-2">
+          <Link
+            to="/dashboard"
+            className="text-gray-400 hover:text-white flex items-center gap-2"
+          >
             <ArrowLeft size={20} />
             返回
           </Link>
@@ -216,19 +314,27 @@ export default function AntigravityCredentials() {
         {stats && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <div className="card p-4">
-              <div className="text-2xl font-bold text-orange-400">{stats.total}</div>
+              <div className="text-2xl font-bold text-orange-400">
+                {stats.total}
+              </div>
               <div className="text-xs text-gray-400">总凭证</div>
             </div>
             <div className="card p-4">
-              <div className="text-2xl font-bold text-green-400">{stats.active}</div>
+              <div className="text-2xl font-bold text-green-400">
+                {stats.active}
+              </div>
               <div className="text-xs text-gray-400">活跃凭证</div>
             </div>
             <div className="card p-4">
-              <div className="text-2xl font-bold text-purple-400">{stats.public}</div>
+              <div className="text-2xl font-bold text-purple-400">
+                {stats.public}
+              </div>
               <div className="text-xs text-gray-400">公开凭证</div>
             </div>
             <div className="card p-4">
-              <div className="text-2xl font-bold text-cyan-400">{stats.user_active}</div>
+              <div className="text-2xl font-bold text-cyan-400">
+                {stats.user_active}
+              </div>
               <div className="text-xs text-gray-400">我的活跃</div>
             </div>
           </div>
@@ -236,11 +342,13 @@ export default function AntigravityCredentials() {
 
         {/* 消息提示 */}
         {message.text && (
-          <div className={`mb-6 p-4 rounded-xl border ${
-            message.type === 'success' 
-              ? 'bg-green-500/10 border-green-500/30 text-green-400' 
-              : 'bg-red-500/10 border-red-500/30 text-red-400'
-          }`}>
+          <div
+            className={`mb-6 p-4 rounded-xl border ${
+              message.type === "success"
+                ? "bg-green-500/10 border-green-500/30 text-green-400"
+                : "bg-red-500/10 border-red-500/30 text-red-400"
+            }`}
+          >
             {message.text}
           </div>
         )}
@@ -251,57 +359,86 @@ export default function AntigravityCredentials() {
             <Upload className="text-orange-400" />
             上传 Antigravity 凭证
           </h2>
-          
+
           <div className="space-y-4">
-            <div 
+            <div
               className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
-                dragOver ? 'border-orange-500 bg-orange-500/10' : 'border-dark-600 hover:border-orange-500'
+                dragOver
+                  ? "border-orange-500 bg-orange-500/10"
+                  : "border-dark-600 hover:border-orange-500"
               }`}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
               onDragLeave={() => setDragOver(false)}
               onDrop={(e) => {
-                e.preventDefault()
-                setDragOver(false)
-                const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.json') || f.name.endsWith('.zip'))
-                if (files.length > 0) setUploadFiles(prev => [...prev, ...files])
+                e.preventDefault();
+                setDragOver(false);
+                const files = Array.from(e.dataTransfer.files).filter(
+                  (f) => f.name.endsWith(".json") || f.name.endsWith(".zip"),
+                );
+                if (files.length > 0)
+                  setUploadFiles((prev) => [...prev, ...files]);
               }}
             >
               <input
                 type="file"
                 accept=".json,.zip"
                 multiple
-                onChange={(e) => setUploadFiles(prev => [...prev, ...Array.from(e.target.files)])}
+                onChange={(e) =>
+                  setUploadFiles((prev) => [
+                    ...prev,
+                    ...Array.from(e.target.files),
+                  ])
+                }
                 className="hidden"
                 id="antigravity-file-input"
               />
-              <label htmlFor="antigravity-file-input" className="cursor-pointer block">
+              <label
+                htmlFor="antigravity-file-input"
+                className="cursor-pointer block"
+              >
                 <Rocket size={32} className="mx-auto mb-3 text-orange-400" />
                 <div className="text-gray-300 mb-1">
-                  {uploadFiles.length > 0 
-                    ? `已选择 ${uploadFiles.length} 个文件` 
-                    : '点击或拖拽 JSON/ZIP 文件'}
+                  {uploadFiles.length > 0
+                    ? `已选择 ${uploadFiles.length} 个文件`
+                    : "点击或拖拽 JSON/ZIP 文件"}
                 </div>
-                <div className="text-xs text-gray-500">Antigravity 凭证会自动获取 project_id</div>
+                <div className="text-xs text-gray-500">
+                  Antigravity 凭证会自动获取 project_id
+                </div>
               </label>
             </div>
-            
+
             {/* 已选文件列表 */}
             {uploadFiles.length > 0 && (
               <div className="bg-dark-800 rounded-lg p-3 space-y-2">
                 <div className="text-xs text-gray-400 mb-2">已选择的文件：</div>
                 {uploadFiles.map((file, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-sm bg-dark-700 rounded px-3 py-2">
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between text-sm bg-dark-700 rounded px-3 py-2"
+                  >
                     <span className="truncate">{file.name}</span>
-                    <button 
-                      onClick={() => setUploadFiles(prev => prev.filter((_, i) => i !== idx))}
+                    <button
+                      onClick={() =>
+                        setUploadFiles((prev) =>
+                          prev.filter((_, i) => i !== idx),
+                        )
+                      }
                       className="text-red-400 hover:text-red-300 ml-2"
                     >
                       ✕
                     </button>
                   </div>
                 ))}
-                <button 
-                  onClick={() => { setUploadFiles([]); document.getElementById('antigravity-file-input').value = '' }}
+                <button
+                  onClick={() => {
+                    setUploadFiles([]);
+                    document.getElementById("antigravity-file-input").value =
+                      "";
+                  }}
                   className="text-xs text-gray-500 hover:text-gray-400"
                 >
                   清空全部
@@ -322,7 +459,9 @@ export default function AntigravityCredentials() {
                     <Gift size={16} />
                     上传到公共池
                   </div>
-                  <div className="text-xs text-orange-300/70">分享凭证，共同使用</div>
+                  <div className="text-xs text-orange-300/70">
+                    分享凭证，共同使用
+                  </div>
                 </div>
               </label>
 
@@ -331,8 +470,12 @@ export default function AntigravityCredentials() {
                 disabled={uploading || uploadFiles.length === 0}
                 className="px-6 py-3 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white rounded-lg flex items-center gap-2 font-medium"
               >
-                {uploading ? <RefreshCw className="animate-spin" size={18} /> : <Upload size={18} />}
-                {uploading ? '上传中...' : '上传凭证'}
+                {uploading ? (
+                  <RefreshCw className="animate-spin" size={18} />
+                ) : (
+                  <Upload size={18} />
+                )}
+                {uploading ? "上传中..." : "上传凭证"}
               </button>
             </div>
           </div>
@@ -346,7 +489,7 @@ export default function AntigravityCredentials() {
               我的 Antigravity 凭证 ({credentials.length})
             </h2>
             <div className="flex items-center gap-2">
-              {credentials.some(c => !c.is_active) && (
+              {credentials.some((c) => !c.is_active) && (
                 <button
                   onClick={deleteAllInactive}
                   className="text-red-400 hover:text-red-300 text-xs px-2 py-1 border border-red-500/30 rounded hover:bg-red-500/10"
@@ -363,7 +506,10 @@ export default function AntigravityCredentials() {
                 获取新凭证
               </Link>
               <button
-                onClick={() => { fetchCredentials(); fetchStats() }}
+                onClick={() => {
+                  fetchCredentials();
+                  fetchStats();
+                }}
                 className="text-gray-400 hover:text-white p-2"
                 title="刷新"
               >
@@ -381,7 +527,9 @@ export default function AntigravityCredentials() {
             <div className="text-center py-12 text-gray-500">
               <Rocket size={48} className="mx-auto mb-4 opacity-30" />
               <p>暂无 Antigravity 凭证</p>
-              <p className="text-sm mt-2">上传 JSON 文件或通过 OAuth 获取凭证</p>
+              <p className="text-sm mt-2">
+                上传 JSON 文件或通过 OAuth 获取凭证
+              </p>
               <Link
                 to="/antigravity-oauth"
                 className="inline-flex items-center gap-2 px-6 py-3 mt-4 bg-orange-600 hover:bg-orange-500 text-white rounded-lg"
@@ -392,13 +540,13 @@ export default function AntigravityCredentials() {
             </div>
           ) : (
             <div className="space-y-3">
-              {credentials.map(cred => (
-                <div 
-                  key={cred.id} 
+              {credentials.map((cred) => (
+                <div
+                  key={cred.id}
                   className={`p-4 rounded-lg border transition-colors ${
-                    cred.is_active 
-                      ? 'bg-dark-800 border-dark-600' 
-                      : 'bg-dark-900 border-dark-700 opacity-60'
+                    cred.is_active
+                      ? "bg-dark-800 border-dark-600"
+                      : "bg-dark-900 border-dark-700 opacity-60"
                   }`}
                 >
                   <div className="flex items-center justify-between">
@@ -407,7 +555,7 @@ export default function AntigravityCredentials() {
                       <div className="text-gray-400 italic mb-2 truncate">
                         {cred.email || cred.name}
                       </div>
-                      
+
                       {/* 状态标签行 */}
                       <div className="flex items-center gap-2 mb-2 flex-wrap">
                         {/* 启用状态 */}
@@ -420,12 +568,12 @@ export default function AntigravityCredentials() {
                             ❌ 已失效
                           </span>
                         )}
-                        
+
                         {/* Antigravity 标签 */}
                         <span className="text-xs px-2.5 py-1 bg-orange-500/20 text-orange-400 rounded font-medium">
                           🚀 Antigravity
                         </span>
-                        
+
                         {/* 公开状态 */}
                         {cred.is_public && (
                           <span className="text-xs px-2.5 py-1 border border-purple-500 text-purple-400 rounded font-medium">
@@ -433,36 +581,41 @@ export default function AntigravityCredentials() {
                           </span>
                         )}
                       </div>
-                      
+
                       {/* Project ID */}
                       {cred.project_id && (
                         <div className="text-xs text-gray-500 truncate mb-1">
                           Project: {cred.project_id}
                         </div>
                       )}
-                      
+
                       {/* 信息行 */}
                       <div className="text-xs text-gray-500">
-                        最后使用: {cred.last_used_at ? new Date(cred.last_used_at).toLocaleString() : '从未使用'}
+                        最后使用:{" "}
+                        {cred.last_used_at
+                          ? new Date(cred.last_used_at).toLocaleString()
+                          : "从未使用"}
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-2 ml-4 flex-wrap">
                       {/* 启用/禁用 */}
                       <button
                         onClick={() => toggleActive(cred.id, cred.is_active)}
                         className={`px-3 py-1.5 rounded text-xs font-medium ${
-                          cred.is_active 
-                            ? 'bg-amber-600 hover:bg-amber-500 text-white' 
-                            : 'bg-green-600 hover:bg-green-500 text-white'
+                          cred.is_active
+                            ? "bg-amber-600 hover:bg-amber-500 text-white"
+                            : "bg-green-600 hover:bg-green-500 text-white"
                         }`}
                       >
-                        {cred.is_active ? '禁用' : '启用'}
+                        {cred.is_active ? "禁用" : "启用"}
                       </button>
-                      
+
                       {/* 检测 */}
                       <button
-                        onClick={() => verifyCred(cred.id, cred.email || cred.name)}
+                        onClick={() =>
+                          verifyCred(cred.id, cred.email || cred.name)
+                        }
                         disabled={verifying === cred.id}
                         className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-50 flex items-center gap-1"
                       >
@@ -473,10 +626,12 @@ export default function AntigravityCredentials() {
                         )}
                         检测
                       </button>
-                      
+
                       {/* 刷新 Project ID */}
                       <button
-                        onClick={() => refreshProjectId(cred.id, cred.email || cred.name)}
+                        onClick={() =>
+                          refreshProjectId(cred.id, cred.email || cred.name)
+                        }
                         disabled={verifying === cred.id}
                         className="px-3 py-1.5 rounded text-xs font-medium bg-orange-600 hover:bg-orange-500 text-white disabled:opacity-50 flex items-center gap-1"
                         title="重新获取 Project ID"
@@ -484,47 +639,57 @@ export default function AntigravityCredentials() {
                         <RefreshCw size={12} />
                         刷新ID
                       </button>
-                      
+
                       {/* 查看额度 */}
                       <button
-                        onClick={() => fetchQuota(cred.id, cred.email || cred.name)}
+                        onClick={() =>
+                          fetchQuota(cred.id, cred.email || cred.name)
+                        }
                         disabled={loadingQuota === cred.id || !cred.is_active}
                         className="px-3 py-1.5 rounded text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 flex items-center gap-1"
-                        title={!cred.is_active ? '凭证无效，无法查询额度' : '查看各模型额度'}
+                        title={
+                          !cred.is_active
+                            ? "凭证无效，无法查询额度"
+                            : "查看各模型额度"
+                        }
                       >
                         {loadingQuota === cred.id ? (
                           <RefreshCw size={12} className="animate-spin" />
                         ) : (
-                          '📊'
+                          "📊"
                         )}
                         额度
                       </button>
-                      
+
                       {/* 导出 */}
                       <button
-                        onClick={() => exportCred(cred.id, cred.email)}
+                        onClick={() => showExportModal(cred.id, cred.email)}
                         className="px-3 py-1.5 rounded text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1"
                       >
                         <Download size={12} />
                         导出
                       </button>
-                      
+
                       {/* 捐赠/取消捐赠 */}
                       <button
                         onClick={() => togglePublic(cred.id, cred.is_public)}
                         disabled={!cred.is_public && !cred.is_active}
-                        title={!cred.is_public && !cred.is_active ? '请先检测凭证有效后再设为公开' : ''}
+                        title={
+                          !cred.is_public && !cred.is_active
+                            ? "请先检测凭证有效后再设为公开"
+                            : ""
+                        }
                         className={`px-3 py-1.5 rounded text-xs font-medium ${
-                          cred.is_public 
-                            ? 'bg-gray-600 hover:bg-gray-500 text-white' 
+                          cred.is_public
+                            ? "bg-gray-600 hover:bg-gray-500 text-white"
                             : !cred.is_active
-                              ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                              : 'bg-purple-600 hover:bg-purple-500 text-white'
+                              ? "bg-gray-700 text-gray-500 cursor-not-allowed"
+                              : "bg-purple-600 hover:bg-purple-500 text-white"
                         }`}
                       >
-                        {cred.is_public ? '取消公开' : '设为公开'}
+                        {cred.is_public ? "取消公开" : "设为公开"}
                       </button>
-                      
+
                       {/* 删除 */}
                       <button
                         onClick={() => deleteCred(cred.id)}
@@ -543,11 +708,18 @@ export default function AntigravityCredentials() {
 
         {/* 说明 */}
         <div className="mt-6 p-4 bg-orange-500/10 border border-orange-500/30 rounded-xl text-sm">
-          <div className="text-orange-400 font-medium mb-2">🚀 Antigravity API 说明</div>
+          <div className="text-orange-400 font-medium mb-2">
+            🚀 Antigravity API 说明
+          </div>
           <ul className="text-orange-300/70 space-y-1">
             <li>• Antigravity 凭证与 GeminiCLI 凭证是独立的，不能混用</li>
             <li>• 上传后会自动使用 Antigravity 方式获取 project_id</li>
-            <li>• 调用端点: <code className="bg-dark-800 px-1 rounded">/agy/v1/chat/completions</code></li>
+            <li>
+              • 调用端点:{" "}
+              <code className="bg-dark-800 px-1 rounded">
+                /agy/v1/chat/completions
+              </code>
+            </li>
           </ul>
         </div>
       </div>
@@ -559,33 +731,54 @@ export default function AntigravityCredentials() {
             <div className="flex items-center justify-between p-4 border-b border-dark-600">
               <h3 className="text-lg font-semibold flex items-center gap-2">
                 {verifyResult.is_project_id_refresh ? (
-                  <RefreshCw className={verifyResult.is_valid ? "text-green-400" : "text-red-400"} />
+                  <RefreshCw
+                    className={
+                      verifyResult.is_valid ? "text-green-400" : "text-red-400"
+                    }
+                  />
                 ) : (
-                  <CheckCircle className={verifyResult.is_valid ? "text-green-400" : "text-red-400"} />
+                  <CheckCircle
+                    className={
+                      verifyResult.is_valid ? "text-green-400" : "text-red-400"
+                    }
+                  />
                 )}
-                {verifyResult.is_project_id_refresh ? '刷新 Project ID 结果' : '凭证检测结果'}
+                {verifyResult.is_project_id_refresh
+                  ? "刷新 Project ID 结果"
+                  : "凭证检测结果"}
               </h3>
-              <button onClick={() => setVerifyResult(null)} className="p-2 hover:bg-dark-600 rounded-lg">
+              <button
+                onClick={() => setVerifyResult(null)}
+                className="p-2 hover:bg-dark-600 rounded-lg"
+              >
                 <X size={20} />
               </button>
             </div>
-            
+
             <div className="p-6 space-y-4">
               {/* 邮箱 */}
               <div className="text-gray-400 text-sm">{verifyResult.email}</div>
-              
+
               {/* 状态 */}
               <div className="flex items-center gap-3">
                 <span className="text-gray-400">状态</span>
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                  verifyResult.is_valid ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
-                }`}>
-                  {verifyResult.is_project_id_refresh 
-                    ? (verifyResult.is_valid ? '✅ 刷新成功' : '❌ 刷新失败')
-                    : (verifyResult.is_valid ? '✅ 有效' : '❌ 无效')}
+                <span
+                  className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    verifyResult.is_valid
+                      ? "bg-green-500/20 text-green-400"
+                      : "bg-red-500/20 text-red-400"
+                  }`}
+                >
+                  {verifyResult.is_project_id_refresh
+                    ? verifyResult.is_valid
+                      ? "✅ 刷新成功"
+                      : "❌ 刷新失败"
+                    : verifyResult.is_valid
+                      ? "✅ 有效"
+                      : "❌ 无效"}
                 </span>
               </div>
-              
+
               {/* Project ID */}
               {verifyResult.project_id && (
                 <div className="flex items-center gap-3">
@@ -595,16 +788,18 @@ export default function AntigravityCredentials() {
                   </span>
                 </div>
               )}
-              
-              {verifyResult.is_project_id_refresh && verifyResult.old_project_id && verifyResult.is_valid && (
-                <div className="flex items-center gap-3">
-                  <span className="text-gray-400">旧 ID</span>
-                  <span className="px-3 py-1 rounded-full text-sm font-medium bg-gray-600/50 text-gray-300 line-through truncate max-w-[200px]">
-                    {verifyResult.old_project_id}
-                  </span>
-                </div>
-              )}
-              
+
+              {verifyResult.is_project_id_refresh &&
+                verifyResult.old_project_id &&
+                verifyResult.is_valid && (
+                  <div className="flex items-center gap-3">
+                    <span className="text-gray-400">旧 ID</span>
+                    <span className="px-3 py-1 rounded-full text-sm font-medium bg-gray-600/50 text-gray-300 line-through truncate max-w-[200px]">
+                      {verifyResult.old_project_id}
+                    </span>
+                  </div>
+                )}
+
               {/* 错误信息 */}
               {verifyResult.error && (
                 <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
@@ -612,7 +807,7 @@ export default function AntigravityCredentials() {
                 </div>
               )}
             </div>
-            
+
             <div className="p-4 border-t border-dark-600 flex justify-end">
               <button
                 onClick={() => setVerifyResult(null)}
@@ -634,110 +829,161 @@ export default function AntigravityCredentials() {
                 <span className="text-2xl">📊</span>
                 额度信息详情
               </h3>
-              <button onClick={() => setQuotaResult(null)} className="p-2 hover:bg-dark-600 rounded-lg">
+              <button
+                onClick={() => setQuotaResult(null)}
+                className="p-2 hover:bg-dark-600 rounded-lg"
+              >
                 <X size={20} />
               </button>
             </div>
-            
+
             <div className="p-6 overflow-y-auto max-h-[60vh]">
               {/* 凭证名称 */}
               <div className="text-sm text-gray-400 mb-4 bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-2">
                 文件: {quotaResult.filename || quotaResult.email}
               </div>
-              
+
               {quotaResult.success ? (
                 <>
                   {Object.keys(quotaResult.models || {}).length > 0 ? (
                     (() => {
                       // 分类模型
                       const categorizeModel = (modelId) => {
-                        const lower = modelId.toLowerCase()
-                        if (lower.includes('claude')) return 'Claude'
-                        if (lower.includes('gemini-3') || lower.includes('3-pro') || lower.includes('3-flash')) return 'Gemini 3.0'
+                        const lower = modelId.toLowerCase();
+                        if (lower.includes("claude")) return "Claude";
+                        if (
+                          lower.includes("gemini-3") ||
+                          lower.includes("3-pro") ||
+                          lower.includes("3-flash")
+                        )
+                          return "Gemini 3.0";
                         // 隐藏 2.5 模型
-                        if (lower.includes('gemini-2.5') || lower.includes('2.5-')) return null
-                        if (lower.includes('gpt-oss') || lower.includes('gpt_oss')) return 'GPT-OSS'
+                        if (
+                          lower.includes("gemini-2.5") ||
+                          lower.includes("2.5-")
+                        )
+                          return null;
+                        if (
+                          lower.includes("gpt-oss") ||
+                          lower.includes("gpt_oss")
+                        )
+                          return "GPT-OSS";
                         // 过滤内部/测试模型
-                        if (lower.includes('chat_') || lower.includes('rev') || lower.includes('tab_') || lower.includes('uic')) return null
-                        return '其他'
-                      }
-                      
+                        if (
+                          lower.includes("chat_") ||
+                          lower.includes("rev") ||
+                          lower.includes("tab_") ||
+                          lower.includes("uic")
+                        )
+                          return null;
+                        return "其他";
+                      };
+
                       const categories = {
-                        'Claude': { color: 'purple', icon: '🟣', models: [] },
-                        'Gemini 3.0': { color: 'cyan', icon: '🔵', models: [] },
+                        Claude: { color: "purple", icon: "🟣", models: [] },
+                        "Gemini 3.0": { color: "cyan", icon: "🔵", models: [] },
 
-                        'GPT-OSS': { color: 'orange', icon: '🟠', models: [] },
-                        '其他': { color: 'gray', icon: '⚪', models: [] }
-                      }
-                      
-                      Object.entries(quotaResult.models).forEach(([modelId, data]) => {
-                        const category = categorizeModel(modelId)
-                        if (category && categories[category]) {
-                          categories[category].models.push({ modelId, data })
-                        }
-                      })
-                      
+                        "GPT-OSS": { color: "orange", icon: "🟠", models: [] },
+                        其他: { color: "gray", icon: "⚪", models: [] },
+                      };
+
+                      Object.entries(quotaResult.models).forEach(
+                        ([modelId, data]) => {
+                          const category = categorizeModel(modelId);
+                          if (category && categories[category]) {
+                            categories[category].models.push({ modelId, data });
+                          }
+                        },
+                      );
+
                       const categoryColors = {
-                        'Claude': 'border-purple-500/50 bg-purple-500/10',
-                        'Gemini 3.0': 'border-cyan-500/50 bg-cyan-500/10',
+                        Claude: "border-purple-500/50 bg-purple-500/10",
+                        "Gemini 3.0": "border-cyan-500/50 bg-cyan-500/10",
 
-                        'GPT-OSS': 'border-orange-500/50 bg-orange-500/10',
-                        '其他': 'border-gray-500/50 bg-gray-500/10'
-                      }
-                      
+                        "GPT-OSS": "border-orange-500/50 bg-orange-500/10",
+                        其他: "border-gray-500/50 bg-gray-500/10",
+                      };
+
                       return (
                         <div className="space-y-4">
-                          {Object.entries(categories).map(([catName, catData]) => {
-                            if (catData.models.length === 0) return null
-                            return (
-                              <div key={catName} className={`rounded-lg border p-3 ${categoryColors[catName]}`}>
-                                <div className="text-sm font-medium mb-3 flex items-center gap-2">
-                                  <span>{catData.icon}</span>
-                                  <span>{catName}</span>
-                                  <span className="text-xs text-gray-400">({catData.models.length})</span>
-                                </div>
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                  {catData.models.map(({ modelId, data }) => {
-                                    const remaining = data.remaining || 0
-                                    const colorClass = remaining >= 80 ? 'bg-green-500' :
-                                                      remaining >= 40 ? 'bg-yellow-500' :
-                                                      remaining >= 20 ? 'bg-orange-500' : 'bg-red-500'
-                                    const textColor = remaining >= 80 ? 'text-green-400' :
-                                                     remaining >= 40 ? 'text-yellow-400' :
-                                                     remaining >= 20 ? 'text-orange-400' : 'text-red-400'
-                                    // 简化模型名称显示
-                                    const shortName = modelId
-                                      .replace('gemini-', '')
-                                      .replace('claude-', '')
-                                      .replace('-thinking', '')
-                                    return (
-                                      <div key={modelId} className="bg-dark-800/80 rounded p-2">
-                                        <div className="text-xs text-gray-400 truncate mb-1" title={modelId}>
-                                          {shortName}
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                          <span className={`text-sm font-bold ${textColor}`}>
-                                            {remaining}%
-                                          </span>
-                                          <div className="flex-1 bg-dark-600 rounded-full h-1">
-                                            <div
-                                              className={`h-1 rounded-full ${colorClass}`}
-                                              style={{ width: `${Math.min(remaining, 100)}%` }}
-                                            />
+                          {Object.entries(categories).map(
+                            ([catName, catData]) => {
+                              if (catData.models.length === 0) return null;
+                              return (
+                                <div
+                                  key={catName}
+                                  className={`rounded-lg border p-3 ${categoryColors[catName]}`}
+                                >
+                                  <div className="text-sm font-medium mb-3 flex items-center gap-2">
+                                    <span>{catData.icon}</span>
+                                    <span>{catName}</span>
+                                    <span className="text-xs text-gray-400">
+                                      ({catData.models.length})
+                                    </span>
+                                  </div>
+                                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                    {catData.models.map(({ modelId, data }) => {
+                                      const remaining = data.remaining || 0;
+                                      const colorClass =
+                                        remaining >= 80
+                                          ? "bg-green-500"
+                                          : remaining >= 40
+                                            ? "bg-yellow-500"
+                                            : remaining >= 20
+                                              ? "bg-orange-500"
+                                              : "bg-red-500";
+                                      const textColor =
+                                        remaining >= 80
+                                          ? "text-green-400"
+                                          : remaining >= 40
+                                            ? "text-yellow-400"
+                                            : remaining >= 20
+                                              ? "text-orange-400"
+                                              : "text-red-400";
+                                      // 简化模型名称显示
+                                      const shortName = modelId
+                                        .replace("gemini-", "")
+                                        .replace("claude-", "")
+                                        .replace("-thinking", "");
+                                      return (
+                                        <div
+                                          key={modelId}
+                                          className="bg-dark-800/80 rounded p-2"
+                                        >
+                                          <div
+                                            className="text-xs text-gray-400 truncate mb-1"
+                                            title={modelId}
+                                          >
+                                            {shortName}
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <span
+                                              className={`text-sm font-bold ${textColor}`}
+                                            >
+                                              {remaining}%
+                                            </span>
+                                            <div className="flex-1 bg-dark-600 rounded-full h-1">
+                                              <div
+                                                className={`h-1 rounded-full ${colorClass}`}
+                                                style={{
+                                                  width: `${Math.min(remaining, 100)}%`,
+                                                }}
+                                              />
+                                            </div>
+                                          </div>
+                                          <div className="text-[9px] text-gray-500 mt-1">
+                                            📅 {data.resetTime || "N/A"}
                                           </div>
                                         </div>
-                                        <div className="text-[9px] text-gray-500 mt-1">
-                                          📅 {data.resetTime || 'N/A'}
-                                        </div>
-                                      </div>
-                                    )
-                                  })}
+                                      );
+                                    })}
+                                  </div>
                                 </div>
-                              </div>
-                            )
-                          })}
+                              );
+                            },
+                          )}
                         </div>
-                      )
+                      );
                     })()
                   ) : (
                     <div className="text-center py-8 text-gray-500">
@@ -747,11 +993,11 @@ export default function AntigravityCredentials() {
                 </>
               ) : (
                 <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400">
-                  {quotaResult.error || '获取额度失败'}
+                  {quotaResult.error || "获取额度失败"}
                 </div>
               )}
             </div>
-            
+
             <div className="p-4 border-t border-dark-600 flex justify-end">
               <button
                 onClick={() => setQuotaResult(null)}
@@ -764,5 +1010,5 @@ export default function AntigravityCredentials() {
         </div>
       )}
     </div>
-  )
+  );
 }

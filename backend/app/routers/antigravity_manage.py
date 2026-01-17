@@ -546,10 +546,16 @@ async def refresh_antigravity_project_id(
 @router.get("/credentials/{cred_id}/export")
 async def export_my_antigravity_credential(
     cred_id: int,
+    format: str = "full",  # full = 完整格式, simple = 简化格式 (email + refresh_token)
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """导出我的 Antigravity 凭证为 JSON 格式"""
+    """导出我的 Antigravity 凭证为 JSON 格式
+    
+    format 参数:
+    - full: 完整格式，包含所有字段
+    - simple: 简化格式，只包含 email 和 refresh_token
+    """
     result = await db.execute(
         select(Credential)
         .where(Credential.id == cred_id)
@@ -560,16 +566,25 @@ async def export_my_antigravity_credential(
     if not cred:
         raise HTTPException(status_code=404, detail="凭证不存在")
     
-    # 构建 JSON 格式
-    cred_data = {
-        "client_id": settings.google_client_id,
-        "client_secret": settings.google_client_secret,
-        "refresh_token": decrypt_credential(cred.refresh_token) if cred.refresh_token else "",
-        "token": decrypt_credential(cred.api_key) if cred.api_key else "",
-        "project_id": cred.project_id or "",
-        "email": cred.email or "",
-        "type": "authorized_user"
-    }
+    refresh_token = decrypt_credential(cred.refresh_token) if cred.refresh_token else ""
+    
+    if format == "simple":
+        # 简化格式：只有 email 和 refresh_token
+        cred_data = {
+            "email": cred.email or "",
+            "refresh_token": refresh_token
+        }
+    else:
+        # 完整格式
+        cred_data = {
+            "client_id": settings.google_client_id,
+            "client_secret": settings.google_client_secret,
+            "refresh_token": refresh_token,
+            "token": decrypt_credential(cred.api_key) if cred.api_key else "",
+            "project_id": cred.project_id or "",
+            "email": cred.email or "",
+            "type": "authorized_user"
+        }
     
     return cred_data
 
