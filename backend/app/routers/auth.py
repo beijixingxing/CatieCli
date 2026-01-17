@@ -628,6 +628,7 @@ async def list_my_credentials(user: User = Depends(get_current_user), db: AsyncS
             "id": c.id,
             "name": c.name,
             "email": c.email,
+            "note": c.note,  # 用户备注
             "is_public": c.is_public,
             "is_active": c.is_active,
             "model_tier": c.model_tier or "2.5",
@@ -650,6 +651,7 @@ async def update_my_credential(
     cred_id: int,
     is_public: bool = None,
     is_active: bool = None,
+    note: str = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -700,6 +702,8 @@ async def update_my_credential(
     if is_active is not None:
         # 手动启用时清除错误（但不清除403错误记录）
         cred.is_active = is_active
+    if note is not None:
+        cred.note = note if note else None
     
     await db.commit()
     return {"message": "更新成功", "is_public": cred.is_public, "is_active": cred.is_active}
