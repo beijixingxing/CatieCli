@@ -397,12 +397,31 @@ docker-compose logs -f
 cd /你的安装目录 && git pull && docker-compose up -d --build
 ```
 
-**1Panel**：
+**Docker Compose（清除缓存，解决构建问题）**：
+
+如果更新后遇到构建问题（如前端没有更新），使用以下命令清除缓存重新构建：
+
+```bash
+cd /你的安装目录
+git pull
+docker-compose build --no-cache
+docker-compose up -d
+```
+
+或者一行命令：
+
+```bash
+cd /你的安装目录 && git pull && docker-compose down && docker-compose build --no-cache && docker-compose up -d
+```
+
+**1Panel（运行环境）**：
 
 ```bash
 cd /opt/CatieCli && git pull
 # 然后在 1Panel 面板重启运行环境
 ```
+
+> 💡 **提示**：1Panel 运行环境部署时，前端已预编译，只需 `git pull` 后重启即可。如果前端没有更新，清除浏览器缓存（`Ctrl+Shift+R`）。
 
 **一键脚本**：
 

@@ -162,11 +162,13 @@ async def oauth_callback(
         
         # 保存凭证
         credential = Credential(
+            user_id=state_data.get("user_id"),  # 关联用户
             name=f"OAuth - {email}",
             api_key=access_token,  # 这里存储的是 access_token
             refresh_token=refresh_token,
             credential_type="oauth",
-            email=email
+            email=email,
+            api_type="geminicli"  # 明确设置为 GeminiCLI 凭证
         )
         db.add(credential)
         await db.commit()
@@ -328,7 +330,8 @@ async def credential_from_callback_url(
                 project_id=project_id,
                 credential_type="oauth",
                 email=email,
-                is_public=data.is_public
+                is_public=data.is_public,
+                api_type="geminicli"  # 明确设置为 GeminiCLI 凭证
             )
             is_new_credential = True
             print(f"[凭证新增] 创建新凭证: {email}", flush=True)
@@ -575,7 +578,8 @@ async def credential_from_callback_url_discord(
                 project_id=project_id,
                 credential_type="oauth",
                 email=email,
-                is_public=data.is_public
+                is_public=data.is_public,
+                api_type="geminicli"  # 明确设置为 GeminiCLI 凭证
             )
             is_new_credential = True
             print(f"[Discord OAuth] 创建新凭证: {email}", flush=True)

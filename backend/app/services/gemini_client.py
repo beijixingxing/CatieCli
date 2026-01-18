@@ -127,9 +127,77 @@ class GeminiClient:
                     if line.startswith("data: "):
                         yield line[6:]
     
+    async def fetch_quota_info(self) -> Dict[str, Any]:
+        """获取配额信息 - 从 Google API 获取实时配额
+        
+        Returns:
+            {
+                "success": True/False,
+                "models": {
+                    "model_name": {
+                        "remaining": 0.95,  # 剩余比例 (0-1)
+                        "resetTime": "2026-01-17T15:00:00Z"
+                    }
+                },
+                "error": "错误信息" (仅在失败时)
+            }
+        """
+        # 注意：GeminiCLI 凭证无法查询实时配额
+        # - cloudcode-pa.googleapis.com 返回 403 (无权限)
+        # - antigravity.googleapis.com 返回 404 (不接受 GeminiCLI token)
+        # 此方法仅作为尝试，失败后会降级到本地统计
+        url = f"{self.INTERNAL_API_BASE}/v1internal:fetchAvailableModels"
+        
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+            "User-Agent": "antigravity/1.11.3 windows/amd64",  # 必须使用 Antigravity User-Agent
+            "Accept-Encoding": "gzip",
+        }
+        
+        # 构建请求体，包含 project_id
+        payload = {}
+        if self.project_id:
+            payload["project"] = self.project_id
+        
+        print(f"[GeminiClient] fetch_quota_info: project={self.project_id}", flush=True)
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, headers=headers, json=payload)
+                
+                print(f"[GeminiClient] fetch_quota_info 响应状态: {response.status_code}", flush=True)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"[GeminiClient] fetch_quota_info 响应内容: {json.dumps(data, ensure_ascii=False)[:800]}", flush=True)
+                    quota_info = {}
+                    
+                    if 'models' in data and isinstance(data['models'], dict):
+                        for model_id, model_data in data['models'].items():
+                            if isinstance(model_data, dict) and 'quotaInfo' in model_data:
+                                quota = model_data['quotaInfo']
+                                remaining = quota.get('remainingFraction', 0)
+                                reset_time = quota.get('resetTime', '')
+                                
+                                quota_info[model_id] = {
+                                    "remaining": remaining,
+                                    "resetTime": reset_time
+                                }
+                    
+                    print(f"[GeminiClient] fetch_quota_info 解析到 {len(quota_info)} 个模型配额", flush=True)
+                    return {"success": True, "models": quota_info}
+                else:
+                    error_text = response.text[:500]
+                    print(f"[GeminiClient] fetch_quota_info 失败: {response.status_code} - {error_text}", flush=True)
+                    return {"success": False, "error": f"API返回错误: {response.status_code} - {error_text}"}
+        except Exception as e:
+            print(f"[GeminiClient] fetch_quota_info 异常: {e}", flush=True)
+            return {"success": False, "error": str(e)}
+    
     def is_fake_streaming(self, model: str) -> bool:
         """检查是否使用假流式"""
-        return model.startswith("假流式/")
+        return model.startswith("假非流/")
     
     async def chat_completions(
         self,
@@ -381,8 +449,8 @@ class GeminiClient:
     
     def _map_model_name(self, model: str) -> str:
         """映射模型名称"""
-        # 移除前缀（假流式/流式抗截断）
-        prefixes = ["假流式/", "流式抗截断/"]
+        # 移除前缀（假非流/流式抗截断）
+        prefixes = ["假非流/", "流式抗截断/"]
         for prefix in prefixes:
             if model.startswith(prefix):
                 model = model[len(prefix):]

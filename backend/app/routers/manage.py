@@ -139,9 +139,20 @@ async def export_credentials(
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
         for cred in credentials:
+            # 根据凭证类型选择正确的 client_id 和 client_secret
+            if cred.api_type == "antigravity":
+                # Antigravity 凭证使用 Antigravity 专用的 client_id
+                from app.routers.antigravity_oauth import ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET
+                export_client_id = ANTIGRAVITY_CLIENT_ID
+                export_client_secret = ANTIGRAVITY_CLIENT_SECRET
+            else:
+                # 普通 GeminiCLI 凭证（使用 settings 配置）
+                export_client_id = settings.google_client_id
+                export_client_secret = settings.google_client_secret
+            
             cred_data = {
-                "client_id": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-                "client_secret": "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",
+                "client_id": export_client_id,
+                "client_secret": export_client_secret,
                 "refresh_token": decrypt_credential(cred.refresh_token) if cred.refresh_token else "",
                 "token": decrypt_credential(cred.api_key) if cred.api_key else "",
                 "project_id": cred.project_id or "",
@@ -578,7 +589,11 @@ async def get_credential_quota(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取单个凭证的配额使用情况"""
+    """获取单个凭证的配额使用情况（优先从 Google API 获取实时配额）"""
+    from app.services.credential_pool import CredentialPool
+    from app.services.gemini_client import GeminiClient
+    from datetime import timedelta
+    
     # 检查凭证权限
     cred = await db.get(Credential, credential_id)
     if not cred:
@@ -586,6 +601,100 @@ async def get_credential_quota(
     if cred.user_id != user.id and not user.is_admin:
         raise HTTPException(status_code=403, detail="无权查看此凭证")
     
+    # 尝试从 Google API 获取实时配额
+    api_quota_success = False
+    api_quota_models = {}
+    api_error_message = None
+    
+    try:
+        access_token = await CredentialPool.get_access_token(cred, db)
+        if access_token and cred.project_id:
+            client = GeminiClient(access_token, cred.project_id)
+            quota_result = await client.fetch_quota_info()
+            
+            if quota_result.get("success"):
+                api_quota_success = True
+                # 转换模型配额数据（转换百分比和北京时间）
+                for model_id, quota_data in quota_result.get("models", {}).items():
+                    remaining = quota_data.get("remaining", 0)
+                    reset_time_raw = quota_data.get("resetTime", "")
+                    
+                    # 转换为北京时间
+                    reset_time_beijing = "N/A"
+                    if reset_time_raw:
+                        try:
+                            from datetime import datetime as dt
+                            if reset_time_raw.endswith("Z"):
+                                utc_date = dt.fromisoformat(reset_time_raw.replace("Z", "+00:00"))
+                            else:
+                                utc_date = dt.fromisoformat(reset_time_raw)
+                            # 转换为北京时间 (UTC+8)
+                            beijing_date = utc_date + timedelta(hours=8)
+                            reset_time_beijing = beijing_date.strftime("%m-%d %H:%M")
+                        except Exception as e:
+                            print(f"[Quota] 解析重置时间失败: {e}", flush=True)
+                    
+                    api_quota_models[model_id] = {
+                        "remaining": round(remaining * 100, 1),  # 转换为百分比
+                        "resetTime": reset_time_beijing,
+                        "resetTimeRaw": reset_time_raw
+                    }
+            else:
+                # API 返回错误（如 403）
+                api_error_message = quota_result.get("error", "未知错误")
+                print(f"[Quota] API 配额查询失败: {api_error_message}", flush=True)
+        else:
+            api_error_message = "无法获取 access_token 或缺少 project_id"
+    except Exception as e:
+        api_error_message = str(e)
+        print(f"[Quota] 从 Google API 获取配额异常: {e}", flush=True)
+    
+    # 如果 API 获取成功，返回 API 配额
+    if api_quota_success and api_quota_models:
+        # 判断账号类型
+        is_pro = cred.account_type == "pro"
+        
+        # 计算汇总信息（基于 API 返回的模型配额）
+        flash_models = [m for m in api_quota_models.keys() if "flash" in m.lower()]
+        pro_models = [m for m in api_quota_models.keys() if "pro" in m.lower() or "gemini-3" in m.lower()]
+        
+        # 获取 Flash 和 Pro 的平均剩余比例
+        flash_remaining = 100
+        pro_remaining = 100
+        reset_time = "N/A"
+        
+        if flash_models:
+            flash_remaining = sum(api_quota_models[m]["remaining"] for m in flash_models) / len(flash_models)
+            reset_time = api_quota_models[flash_models[0]].get("resetTime", "N/A")
+        if pro_models:
+            pro_remaining = sum(api_quota_models[m]["remaining"] for m in pro_models) / len(pro_models)
+            if reset_time == "N/A":
+                reset_time = api_quota_models[pro_models[0]].get("resetTime", "N/A")
+        
+        # 返回 API 配额数据
+        return {
+            "credential_id": credential_id,
+            "credential_name": cred.name,
+            "email": cred.email,
+            "account_type": "pro" if is_pro else "free",
+            "source": "google_api",  # 标记数据来源
+            "reset_time": reset_time,
+            "flash": {
+                "percentage": round(flash_remaining, 1),
+                "note": "2.5-flash 配额"
+            },
+            "premium": {
+                "percentage": round(pro_remaining, 1),
+                "note": "2.5-pro 和 3.0 共用"
+            },
+            "models": [
+                {"model": model_id, "remaining": data["remaining"], "resetTime": data["resetTime"]}
+                for model_id, data in api_quota_models.items()
+            ]
+        }
+    
+    # API 失败，降级到本地数据库统计
+    # ===== 降级：从本地数据库统计配额 =====
     # 获取今天的开始时间（北京时间 15:00 = UTC 07:00 重置）
     now = datetime.utcnow()
     today_7am = now.replace(hour=7, minute=0, second=0, microsecond=0)
@@ -663,20 +772,21 @@ async def get_credential_quota(
         "credential_name": cred.name,
         "email": cred.email,
         "account_type": "pro" if is_pro else "free",
+        "source": "local_usage",  # 标记数据来源（本地统计）
         "reset_time": next_reset.isoformat() + "Z",
         "flash": {
             "used": flash_used,
             "limit": flash_limit,
             "remaining": flash_remaining,
             "percentage": round(flash_percentage, 1),
-            "note": "2.5-flash 专用"
+            "note": "2.5-flash 专用 (本地统计)"
         },
         "premium": {
             "used": premium_used,
             "limit": premium_limit,
             "remaining": premium_remaining,
             "percentage": round(premium_percentage, 1),
-            "note": "2.5-pro 和 3.0 共用"
+            "note": "2.5-pro 和 3.0 共用 (本地统计)"
         },
         "models": quota_info
     }
@@ -758,22 +868,54 @@ async def get_stats_overview(
 @router.get("/stats/by-model")
 async def get_stats_by_model(
     days: int = 7,
+    page: int = 1,
+    page_size: int = 10,
+    api_type: str = "all",  # all, cli, antigravity
     user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    """按模型统计使用量"""
+    """按模型统计使用量（支持分页和API类型过滤）"""
     since = datetime.utcnow() - timedelta(days=days)
     
-    result = await db.execute(
+    # 构建 API 类型过滤条件
+    def build_api_type_filter():
+        if api_type == "cli":
+            return UsageLog.model.notlike('antigravity/%')
+        elif api_type == "antigravity":
+            return UsageLog.model.like('antigravity/%')
+        else:
+            return True
+    
+    api_filter = build_api_type_filter()
+    
+    # 基础查询
+    base_query = (
         select(UsageLog.model, func.count(UsageLog.id).label("count"))
         .where(UsageLog.created_at >= since)
-        .group_by(UsageLog.model)
-        .order_by(func.count(UsageLog.id).desc())
     )
+    if api_type != "all":
+        base_query = base_query.where(api_filter)
+    base_query = base_query.group_by(UsageLog.model).order_by(func.count(UsageLog.id).desc())
+    
+    # 获取总数
+    total_query = select(func.count(func.distinct(UsageLog.model))).where(UsageLog.created_at >= since)
+    if api_type != "all":
+        total_query = total_query.where(api_filter)
+    total_result = await db.execute(total_query)
+    total = total_result.scalar() or 0
+    total_pages = (total + page_size - 1) // page_size if page_size > 0 else 1
+    
+    # 分页查询
+    offset = (page - 1) * page_size
+    result = await db.execute(base_query.offset(offset).limit(page_size))
     
     return {
         "period_days": days,
-        "models": [{"model": row[0] or "unknown", "count": row[1]} for row in result.all()]
+        "models": [{"model": row[0] or "unknown", "count": row[1]} for row in result.all()],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages
     }
 
 
@@ -866,6 +1008,15 @@ async def get_config(user: User = Depends(get_current_admin)):
         "stats_quota_flash": settings.stats_quota_flash,
         "stats_quota_25pro": settings.stats_quota_25pro,
         "stats_quota_30pro": settings.stats_quota_30pro,
+        "antigravity_enabled": settings.antigravity_enabled,
+        "antigravity_system_prompt": settings.antigravity_system_prompt,
+        "antigravity_quota_enabled": settings.antigravity_quota_enabled,
+        "antigravity_quota_default": settings.antigravity_quota_default,
+        "antigravity_quota_contributor": settings.antigravity_quota_contributor,
+        "antigravity_base_rpm": settings.antigravity_base_rpm,
+        "antigravity_contributor_rpm": settings.antigravity_contributor_rpm,
+        "oauth_guide_enabled": settings.oauth_guide_enabled,
+        "oauth_guide_seconds": settings.oauth_guide_seconds,
     }
 
 
@@ -893,6 +1044,8 @@ async def get_public_config():
         "credential_pool_mode": settings.credential_pool_mode,
         "base_rpm": settings.base_rpm,
         "contributor_rpm": settings.contributor_rpm,
+        "oauth_guide_enabled": settings.oauth_guide_enabled,
+        "oauth_guide_seconds": settings.oauth_guide_seconds,
     }
 
 
@@ -930,6 +1083,15 @@ async def update_config(
     stats_quota_flash: Optional[int] = Form(None),
     stats_quota_25pro: Optional[int] = Form(None),
     stats_quota_30pro: Optional[int] = Form(None),
+    antigravity_enabled: Optional[bool] = Form(None),
+    antigravity_system_prompt: Optional[str] = Form(None),
+    antigravity_quota_enabled: Optional[bool] = Form(None),
+    antigravity_quota_default: Optional[int] = Form(None),
+    antigravity_quota_contributor: Optional[int] = Form(None),
+    antigravity_base_rpm: Optional[int] = Form(None),
+    antigravity_contributor_rpm: Optional[int] = Form(None),
+    oauth_guide_enabled: Optional[bool] = Form(None),
+    oauth_guide_seconds: Optional[int] = Form(None),
     user: User = Depends(get_current_admin)
 ):
     """更新配置（持久化保存到数据库）"""
@@ -1074,6 +1236,46 @@ async def update_config(
         await save_config_to_db("stats_quota_30pro", stats_quota_30pro)
         updated["stats_quota_30pro"] = stats_quota_30pro
     
+    # Antigravity 反代配置
+    if antigravity_enabled is not None:
+        settings.antigravity_enabled = antigravity_enabled
+        await save_config_to_db("antigravity_enabled", antigravity_enabled)
+        updated["antigravity_enabled"] = antigravity_enabled
+    if antigravity_system_prompt is not None:
+        settings.antigravity_system_prompt = antigravity_system_prompt
+        await save_config_to_db("antigravity_system_prompt", antigravity_system_prompt)
+        updated["antigravity_system_prompt"] = antigravity_system_prompt
+    if antigravity_quota_enabled is not None:
+        settings.antigravity_quota_enabled = antigravity_quota_enabled
+        await save_config_to_db("antigravity_quota_enabled", antigravity_quota_enabled)
+        updated["antigravity_quota_enabled"] = antigravity_quota_enabled
+    if antigravity_quota_default is not None:
+        settings.antigravity_quota_default = antigravity_quota_default
+        await save_config_to_db("antigravity_quota_default", antigravity_quota_default)
+        updated["antigravity_quota_default"] = antigravity_quota_default
+    if antigravity_quota_contributor is not None:
+        settings.antigravity_quota_contributor = antigravity_quota_contributor
+        await save_config_to_db("antigravity_quota_contributor", antigravity_quota_contributor)
+        updated["antigravity_quota_contributor"] = antigravity_quota_contributor
+    if antigravity_base_rpm is not None:
+        settings.antigravity_base_rpm = antigravity_base_rpm
+        await save_config_to_db("antigravity_base_rpm", antigravity_base_rpm)
+        updated["antigravity_base_rpm"] = antigravity_base_rpm
+    if antigravity_contributor_rpm is not None:
+        settings.antigravity_contributor_rpm = antigravity_contributor_rpm
+        await save_config_to_db("antigravity_contributor_rpm", antigravity_contributor_rpm)
+        updated["antigravity_contributor_rpm"] = antigravity_contributor_rpm
+    
+    # OAuth 操作指引弹窗配置
+    if oauth_guide_enabled is not None:
+        settings.oauth_guide_enabled = oauth_guide_enabled
+        await save_config_to_db("oauth_guide_enabled", oauth_guide_enabled)
+        updated["oauth_guide_enabled"] = oauth_guide_enabled
+    if oauth_guide_seconds is not None:
+        settings.oauth_guide_seconds = oauth_guide_seconds
+        await save_config_to_db("oauth_guide_seconds", oauth_guide_seconds)
+        updated["oauth_guide_seconds"] = oauth_guide_seconds
+    
     return {"message": "配置已保存", "updated": updated}
 
 
@@ -1081,12 +1283,20 @@ async def update_config(
 
 @router.get("/stats/global")
 async def get_global_stats(
+    api_type: str = "all",  # all, cli, antigravity
     user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取全站统计（按模型分类）- 带缓存"""
-    # 尝试从缓存获取（缓存5秒）
-    cached_stats = cache.get("stats:global")
+    """获取全站统计（按模型分类）- 带缓存
+    
+    api_type: 
+        - all: 所有请求
+        - cli: GeminiCLI 请求（模型不含 antigravity/）
+        - antigravity: Antigravity 请求（模型含 antigravity/）
+    """
+    # 尝试从缓存获取（缓存5秒，按 api_type 分开缓存）
+    cache_key = f"stats:global:{api_type}"
+    cached_stats = cache.get(cache_key)
     if cached_stats:
         return cached_stats
     
@@ -1101,38 +1311,84 @@ async def get_global_stats(
     else:
         start_of_day = reset_time_utc
     
+    # 构建 API 类型过滤条件
+    def build_api_type_filter():
+        if api_type == "cli":
+            return UsageLog.model.notlike('antigravity/%')
+        elif api_type == "antigravity":
+            return UsageLog.model.like('antigravity/%')
+        else:
+            return True  # 不过滤
+    
+    api_filter = build_api_type_filter()
+    
     # 按模型分类统计（今日）
+    base_query = select(UsageLog.model, func.count(UsageLog.id).label("count")).where(UsageLog.created_at >= start_of_day)
+    if api_type != "all":
+        base_query = base_query.where(api_filter)
     model_stats_result = await db.execute(
-        select(UsageLog.model, func.count(UsageLog.id).label("count"))
-        .where(UsageLog.created_at >= start_of_day)
-        .group_by(UsageLog.model)
-        .order_by(func.count(UsageLog.id).desc())
+        base_query.group_by(UsageLog.model).order_by(func.count(UsageLog.id).desc())
     )
     model_stats = [{"model": row[0] or "unknown", "count": row[1]} for row in model_stats_result.all()]
     
-    # 分类汇总
-    flash_count = sum(s["count"] for s in model_stats if "flash" in s["model"].lower())
-    pro_count = sum(s["count"] for s in model_stats if "pro" in s["model"].lower() and "3" not in s["model"])
-    tier3_count = sum(s["count"] for s in model_stats if "3" in s["model"])
+    # 分类汇总 - 根据 API 类型使用不同分类方式
+    if api_type == "antigravity":
+        # Antigravity 分类：按模型品牌 (Claude/Gemini/其他)
+        def is_claude(model: str) -> bool:
+            m = model.lower()
+            return "claude" in m
+        
+        def is_gemini(model: str) -> bool:
+            m = model.lower()
+            return "gemini" in m
+        
+        def is_other(model: str) -> bool:
+            return not is_claude(model) and not is_gemini(model)
+        
+        claude_count = sum(s["count"] for s in model_stats if is_claude(s["model"]))
+        gemini_count = sum(s["count"] for s in model_stats if is_gemini(s["model"]))
+        other_count = sum(s["count"] for s in model_stats if is_other(s["model"]))
+        # 使用相同的字段名以兼容前端
+        flash_count = claude_count  # 对应前端 flash -> Claude
+        pro_count = gemini_count    # 对应前端 pro -> Gemini
+        tier3_count = other_count   # 对应前端 tier3 -> 其他
+    else:
+        # CLI/全部 分类：按 Gemini 模型等级（互斥分类：3.0 > Pro > Flash）
+        def is_tier3(model: str) -> bool:
+            m = model.lower()
+            return "gemini-3" in m or "3.0" in m or "tier3" in m or m.startswith("3-") or "/gemini-3" in m
+        
+        def is_pro(model: str) -> bool:
+            m = model.lower()
+            return "pro" in m and not is_tier3(model)
+        
+        def is_flash(model: str) -> bool:
+            m = model.lower()
+            return "flash" in m and not is_tier3(model)
+        
+        tier3_count = sum(s["count"] for s in model_stats if is_tier3(s["model"]))
+        pro_count = sum(s["count"] for s in model_stats if is_pro(s["model"]))
+        flash_count = sum(s["count"] for s in model_stats if is_flash(s["model"]))
     
     # 最近1小时请求数
-    hour_result = await db.execute(
-        select(func.count(UsageLog.id)).where(UsageLog.created_at >= hour_ago)
-    )
+    hour_query = select(func.count(UsageLog.id)).where(UsageLog.created_at >= hour_ago)
+    if api_type != "all":
+        hour_query = hour_query.where(api_filter)
+    hour_result = await db.execute(hour_query)
     hour_requests = hour_result.scalar() or 0
     
     # 今日总请求数
-    today_result = await db.execute(
-        select(func.count(UsageLog.id)).where(UsageLog.created_at >= start_of_day)
-    )
+    today_query = select(func.count(UsageLog.id)).where(UsageLog.created_at >= start_of_day)
+    if api_type != "all":
+        today_query = today_query.where(api_filter)
+    today_result = await db.execute(today_query)
     today_requests = today_result.scalar() or 0
     
     # 今日成功/失败统计
-    today_success_result = await db.execute(
-        select(func.count(UsageLog.id))
-        .where(UsageLog.created_at >= start_of_day)
-        .where(UsageLog.status_code == 200)
-    )
+    success_query = select(func.count(UsageLog.id)).where(UsageLog.created_at >= start_of_day).where(UsageLog.status_code == 200)
+    if api_type != "all":
+        success_query = success_query.where(api_filter)
+    today_success_result = await db.execute(success_query)
     today_success = today_success_result.scalar() or 0
     today_failed = today_requests - today_success
     
@@ -1206,6 +1462,12 @@ async def get_global_stats(
         )
     )
     
+    # 配额计算专用：统计公共凭证总数（不管是否冷却），避免配额越算越少
+    public_creds_for_quota = await db.execute(
+        select(func.count(Credential.id)).where(Credential.is_public == True)
+    )
+    public_creds_quota_count = public_creds_for_quota.scalar() or 0
+    
     tier3_cred_result = await db.execute(
         select(func.count(Credential.id))
         .where(Credential.model_tier == "3")
@@ -1221,6 +1483,14 @@ async def get_global_stats(
         .where(Credential.is_public == True)
     )
     public_tier3_creds = public_tier3_result.scalar() or 0
+    
+    # 配额计算专用：公共3.0凭证总数（不管是否冷却）
+    public_tier3_for_quota = await db.execute(
+        select(func.count(Credential.id))
+        .where(Credential.model_tier == "3")
+        .where(Credential.is_public == True)
+    )
+    public_tier3_quota_count = public_tier3_for_quota.scalar() or 0
     
     # 按账号类型统计凭证数量
     pro_creds_result = await db.execute(
@@ -1259,9 +1529,9 @@ async def get_global_stats(
         quota_base_count = active_count
         quota_tier3_count = tier3_creds
     else:
-        # 共享模式：基于公共池凭证计算
-        quota_base_count = public_active_count
-        quota_tier3_count = public_tier3_creds
+        # 共享模式：基于公共池凭证总数计算（不考虑冷却状态，避免配额越算越少）
+        quota_base_count = public_creds_quota_count
+        quota_tier3_count = public_tier3_quota_count
     
     # 配额计算
     total_quota_flash = quota_base_count * settings.quota_flash

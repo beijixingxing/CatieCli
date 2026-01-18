@@ -227,6 +227,7 @@ class CredentialUpdate(BaseModel):
     name: Optional[str] = None
     api_key: Optional[str] = None
     is_active: Optional[bool] = None
+    note: Optional[str] = None  # 用户备注
 
 
 @router.get("/credentials")
@@ -254,7 +255,9 @@ async def list_credentials(
                 "id": c.id,
                 "name": c.name,
                 "email": c.email,
+                "note": c.note,  # 用户备注
                 "api_key": c.api_key[:20] + "..." if c.api_key and len(c.api_key) > 20 else (c.api_key or ""),
+                "api_type": c.api_type or "geminicli",  # 默认为geminicli
                 "model_tier": c.model_tier,
                 "is_active": c.is_active,
                 "total_requests": c.total_requests or 0,
@@ -303,6 +306,8 @@ async def update_credential(
         credential.api_key = data.api_key
     if data.is_active is not None:
         credential.is_active = data.is_active
+    if data.note is not None:
+        credential.note = data.note
     
     await db.commit()
     await notify_credential_update()

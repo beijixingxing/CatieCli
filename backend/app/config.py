@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     announcement_content: str = ""
     announcement_read_seconds: int = 5  # 阅读多少秒才能关闭
     
+    # OAuth 操作指引弹窗
+    oauth_guide_enabled: bool = True   # 是否显示操作指引弹窗
+    oauth_guide_seconds: int = 8       # 倒计时秒数（0=无倒计时立即可关闭）
+
+    
     # Google OAuth (Gemini CLI 官方配置)
     google_client_id: str = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
     google_client_secret: str = "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"
@@ -120,6 +125,27 @@ class Settings(BaseSettings):
     # OpenAI API 反代 (可选)
     openai_api_key: str = ""  # 如果填写，则支持真正的 OpenAI API 反代
     openai_api_base: str = "https://api.openai.com"
+    
+    # Antigravity API 反代配置
+    antigravity_enabled: bool = True  # 是否启用 Antigravity API 反代
+    antigravity_api_base: str = "https://daily-cloudcode-pa.sandbox.googleapis.com"
+    # Antigravity 系统提示词前缀（使用官方默认值，用户可自行修改）
+    # 此提示词用于绕过 Claude 模型的 429 限制
+    antigravity_system_prompt: str = """**Example of deprecated persona description (for reference only):**
+
+You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.
+
+ You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question. **Proactiveness**"""
+    # Antigravity OAuth 配置（留空则使用默认值，见 antigravity_oauth.py）
+    antigravity_client_id: str = ""
+    antigravity_client_secret: str = ""
+    # Antigravity 配额配置
+    antigravity_quota_enabled: bool = True         # 是否启用 Antigravity 配额限制
+    antigravity_quota_default: int = 100           # 默认 Antigravity 每日配额
+    antigravity_quota_contributor: int = 500       # 贡献凭证奖励配额
+    # Antigravity 速率限制 (RPM)
+    antigravity_base_rpm: int = 5                  # 未上传凭证的用户 RPM
+    antigravity_contributor_rpm: int = 10          # 上传凭证的用户 RPM
     
     # Discord OAuth (可选，用于 Discord 登录/注册)
     discord_client_id: str = ""
@@ -164,6 +190,15 @@ PERSISTENT_CONFIG_KEYS = [
     "announcement_title",
     "announcement_content",
     "announcement_read_seconds",
+    "antigravity_enabled",
+    "antigravity_system_prompt",
+    "antigravity_quota_enabled",
+    "antigravity_quota_default",
+    "antigravity_quota_contributor",
+    "antigravity_base_rpm",
+    "antigravity_contributor_rpm",
+    "oauth_guide_enabled",
+    "oauth_guide_seconds",
 ]
 
 

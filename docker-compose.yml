@@ -1,9 +1,7 @@
-version: '3.8'
-
 services:
-  # 后端服务
+  # 后端服务（包含前端构建）
   backend:
-    build: ./backend
+    build: .
     container_name: catiecli-backend
     ports:
       - '${PORT:-5001}:${PORT:-5001}'

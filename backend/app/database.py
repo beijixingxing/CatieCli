@@ -105,6 +105,18 @@ async def init_db(skip_migration_check: bool = False):
                 "ALTER TABLE usage_logs ADD COLUMN error_type VARCHAR(50)",
                 "ALTER TABLE usage_logs ADD COLUMN error_code VARCHAR(100)",
                 "ALTER TABLE usage_logs ADD COLUMN credential_email VARCHAR(100)",
+                # Antigravity 支持（新增）
+                "ALTER TABLE credentials ADD COLUMN api_type VARCHAR(20) DEFAULT 'geminicli'",
+                "ALTER TABLE credentials ADD COLUMN credential_type VARCHAR(20) DEFAULT 'oauth'",
+                "ALTER TABLE credentials ADD COLUMN model_tier VARCHAR(20)",
+                "ALTER TABLE credentials ADD COLUMN model_cooldowns TEXT",
+                # Antigravity 用户配额
+                "ALTER TABLE users ADD COLUMN quota_antigravity INTEGER DEFAULT 100",
+                "ALTER TABLE users ADD COLUMN used_antigravity INTEGER DEFAULT 0",
+                # 凭证备注
+                "ALTER TABLE credentials ADD COLUMN note VARCHAR(500)",
+                # 重试次数统计
+                "ALTER TABLE usage_logs ADD COLUMN retry_count INTEGER DEFAULT 0",
             ]
         else:
             # PostgreSQL 迁移（使用 IF NOT EXISTS 语法）
@@ -129,6 +141,18 @@ async def init_db(skip_migration_check: bool = False):
                 "ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS error_type VARCHAR(50)",
                 "ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS error_code VARCHAR(100)",
                 "ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS credential_email VARCHAR(100)",
+                # Antigravity 支持（新增）
+                "ALTER TABLE credentials ADD COLUMN IF NOT EXISTS api_type VARCHAR(20) DEFAULT 'geminicli'",
+                "ALTER TABLE credentials ADD COLUMN IF NOT EXISTS credential_type VARCHAR(20) DEFAULT 'oauth'",
+                "ALTER TABLE credentials ADD COLUMN IF NOT EXISTS model_tier VARCHAR(20)",
+                "ALTER TABLE credentials ADD COLUMN IF NOT EXISTS model_cooldowns TEXT",
+                # Antigravity 用户配额
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS quota_antigravity INTEGER DEFAULT 100",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS used_antigravity INTEGER DEFAULT 0",
+                # 凭证备注
+                "ALTER TABLE credentials ADD COLUMN IF NOT EXISTS note VARCHAR(500)",
+                # 重试次数统计
+                "ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0",
             ]
         
         for sql in migrations:
@@ -152,6 +176,8 @@ async def init_db(skip_migration_check: bool = False):
             # 错误分类索引（新增）
             "CREATE INDEX IF NOT EXISTS idx_usage_logs_error_type ON usage_logs(error_type)",
             "CREATE INDEX IF NOT EXISTS idx_usage_logs_date_error ON usage_logs(created_at, error_type)",
+            # Antigravity 索引（新增）
+            "CREATE INDEX IF NOT EXISTS idx_credentials_api_type ON credentials(api_type)",
         ]
         
         for sql in indexes:
@@ -160,3 +186,16 @@ async def init_db(skip_migration_check: bool = False):
                 print(f"[DB Index] ✅ {sql[30:70]}...")
             except Exception as e:
                 pass  # 索引已存在，忽略
+        
+        # 数据修复：将 api_type 为空或 NULL 的凭证更新为 geminicli（排除 antigravity）
+        # 这是为了修复历史数据中未设置 api_type 的凭证
+        try:
+            if is_sqlite:
+                fix_sql = "UPDATE credentials SET api_type = 'geminicli' WHERE api_type IS NULL OR api_type = ''"
+            else:
+                fix_sql = "UPDATE credentials SET api_type = 'geminicli' WHERE api_type IS NULL OR api_type = ''"
+            result = await conn.execute(text(fix_sql))
+            if result.rowcount > 0:
+                print(f"[DB Fix] ✅ 已修复 {result.rowcount} 个凭证的 api_type 字段")
+        except Exception as e:
+            print(f"[DB Fix] ⚠️ 修复 api_type 失败: {e}")

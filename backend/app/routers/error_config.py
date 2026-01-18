@@ -118,9 +118,9 @@ async def get_status(
         "CONTENT_FILTER": "400",
         "NETWORK_ERROR": "500",
         "UPSTREAM_ERROR": "500/502/503/504",
-        "TIMEOUT": "500",
+        "TIMEOUT": "超时",
         "TOKEN_ERROR": "503",
-        "UNKNOWN": "-",
+        "UNKNOWN": "其他",
     }
     
     return {
@@ -128,7 +128,7 @@ async def get_status(
         "error_types": [
             {
                 "value": k, 
-                "label": f"{v} ({ERROR_TYPE_CODES.get(k, '-')})"
+                "label": f"{v} ({ERROR_TYPE_CODES.get(k, '')})"
             }
             for k, v in ERROR_TYPE_NAMES.items()
         ]
