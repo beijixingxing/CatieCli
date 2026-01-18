@@ -115,6 +115,8 @@ async def init_db(skip_migration_check: bool = False):
                 "ALTER TABLE users ADD COLUMN used_antigravity INTEGER DEFAULT 0",
                 # 凭证备注
                 "ALTER TABLE credentials ADD COLUMN note VARCHAR(500)",
+                # 重试次数统计
+                "ALTER TABLE usage_logs ADD COLUMN retry_count INTEGER DEFAULT 0",
             ]
         else:
             # PostgreSQL 迁移（使用 IF NOT EXISTS 语法）
@@ -149,6 +151,8 @@ async def init_db(skip_migration_check: bool = False):
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS used_antigravity INTEGER DEFAULT 0",
                 # 凭证备注
                 "ALTER TABLE credentials ADD COLUMN IF NOT EXISTS note VARCHAR(500)",
+                # 重试次数统计
+                "ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0",
             ]
         
         for sql in migrations:
